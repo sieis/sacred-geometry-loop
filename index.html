@@ -111,7 +111,6 @@
         }
 
         body.sidebar-hidden #canvas-container {
-            width: min(100vw, 100vh);
             border-radius: 0;
         }
 
@@ -336,9 +335,10 @@
         }
 
         #canvas-container {
-            /* Square canvas: fill all available width, capped only by
-               viewport height (container padding accounted for) */
-            width: min(100%, calc(100vh - 40px));
+            /* Fill the whole area beside the sidebar; the p5 canvas is
+               resized to match via JS so the artwork never distorts */
+            width: 100%;
+            height: 100%;
             border-radius: 12px;
             overflow: hidden;
             box-shadow: 0 20px 40px rgba(20, 20, 19, 0.1);
@@ -348,7 +348,7 @@
         #canvas-container canvas {
             display: block;
             width: 100% !important;
-            height: auto !important;
+            height: 100% !important;
         }
 
         /* Loading State */
@@ -374,6 +374,12 @@
 
             .canvas-area {
                 padding: 20px;
+            }
+
+            /* Stacked layout has no fixed height, so keep the canvas square */
+            #canvas-container {
+                height: auto;
+                aspect-ratio: 1 / 1;
             }
         }
     </style>
@@ -660,11 +666,23 @@
         const MAX_GENS = 4;
         const MAX_SATS = 6;
 
+        function containerSize() {
+            let el = document.getElementById('canvas-container');
+            return [Math.max(el.clientWidth, 100), Math.max(el.clientHeight, 100)];
+        }
+
         function setup() {
-            let canvas = createCanvas(1600, 1600);
+            let [w, h] = containerSize();
+            let canvas = createCanvas(w, h);
             canvas.parent('canvas-container');
             initializeSystem();
             document.querySelector('.loading').style.display = 'none';
+        }
+
+        function windowResized() {
+            let [w, h] = containerSize();
+            resizeCanvas(w, h);
+            background(params.colorPalette[2]); // resize clears trails anyway
         }
 
         function initializeSystem() {
@@ -903,6 +921,9 @@
 
         function toggleSidebar() {
             document.body.classList.toggle('sidebar-hidden');
+            if (typeof resizeCanvas === 'function' && width) {
+                windowResized(); // canvas area changed size
+            }
         }
 
         function updateParam(paramName, value) {
