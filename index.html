@@ -659,9 +659,9 @@
         let breathPhases = [];
         let satPhase = 0;
         let satConfigs = [];
+        let seedTraits = { weaveExp: 1, layerScale: 0.78, skip: 1 };
         const PHI = 1.6180339887498948;
         const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-        const LAYER_SCALE = 0.78;   // size ratio between stacked stars
         const MAX_LAYERS = 5;
         const MAX_GENS = 4;
         const MAX_SATS = 6;
@@ -689,10 +689,22 @@
             randomSeed(params.seed);
             noiseSeed(params.seed);
 
+            // Seed-defined character of the whole composition: how sharply
+            // the thread envelopes curve, how tightly the stacked stars
+            // nest, and whether threads stitch adjacent spokes or leap
+            // across one (which weaves a crossing star-polygon lattice).
+            seedTraits = {
+                weaveExp: random(0.55, 1.7),
+                layerScale: random(0.62, 0.9),
+                skip: random() < 0.75 ? 1 : 2
+            };
+
             // Each layer inherits a fixed angular offset from the golden angle
             // plus seeded jitter, so stacked stars interleave, never align.
-            layerOffsets = [];
-            for (let L = 0; L < MAX_LAYERS; L++) {
+            // Layer 0 stays at zero so the outermost star points straight up
+            // whenever rotation is stopped.
+            layerOffsets = [0];
+            for (let L = 1; L < MAX_LAYERS; L++) {
                 layerOffsets.push((params.seed * GOLDEN_ANGLE + L * GOLDEN_ANGLE) % TWO_PI + random(-0.3, 0.3));
             }
 
@@ -737,8 +749,10 @@
         function buildSpokes(axisCount, branchDepth, branchScale) {
             let spokes = [];
             let n = axisCount;
+            // Spoke 0 points straight up (-90°) so the structure reads as
+            // vertically aligned whenever rotation is zero.
             for (let i = 0; i < n; i++) {
-                spokes.push({ angle: (TWO_PI * i) / n, len: 1, gen: 0 });
+                spokes.push({ angle: (-HALF_PI + (TWO_PI * i) / n + TWO_PI) % TWO_PI, len: 1, gen: 0 });
             }
             for (let g = 1; g <= branchDepth; g++) {
                 spokes.sort((a, b) => a.angle - b.angle);
@@ -775,7 +789,7 @@
                 let dir = ((L % 2 === 0) ? 1 : -1) * cfg.flip;
                 let speed = params.rotationSpeed * 0.3 * (1 + L * 0.22) * cfg.speedMult;
                 let rot = layerOffsets[L] + cfg.spinBias + t * speed * dir;
-                let scale = Math.pow(LAYER_SCALE, L) * R;
+                let scale = Math.pow(seedTraits.layerScale, L) * R;
 
                 // Layer color: outermost = primary, inner layers shade toward
                 // secondary; inner layers slightly brighter to read on top.
@@ -802,10 +816,12 @@
                 // 2. The stitching: straight chords woven between adjacent spokes
                 for (let i = 0; i < tips.length; i++) {
                     let A = tips[i];
-                    let B = tips[(i + 1) % tips.length];
+                    let B = tips[(i + seedTraits.skip) % tips.length];
                     for (let j = 0; j < d; j++) {
-                        let fA = (d - j) / d;   // slides down spoke A
-                        let fB = (j + 1) / d;   // slides up spoke B
+                        // weaveExp warps how fast the anchors slide along
+                        // their spokes, bending the envelope's curvature
+                        let fA = Math.pow((d - j) / d, seedTraits.weaveExp);   // slides down spoke A
+                        let fB = Math.pow((j + 1) / d, seedTraits.weaveExp);   // slides up spoke B
                         let x1 = ox + (A.x - ox) * fA;
                         let y1 = oy + (A.y - oy) * fA;
                         let x2 = ox + (B.x - ox) * fB;
