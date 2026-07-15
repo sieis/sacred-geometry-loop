@@ -325,6 +325,10 @@
             flex: 1;
         }
 
+        .share-button {
+            margin-top: 8px;
+        }
+
         /* Canvas Area */
         .canvas-area {
             flex: 1;
@@ -568,6 +572,22 @@
                         <span class="color-value" id="color3-value">#2b1f14</span>
                     </div>
                 </div>
+
+                <div class="color-group">
+                    <label>Satellite Primary</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color4" value="#f0e6d2" onchange="updateColor('color4', this.value)">
+                        <span class="color-value" id="color4-value">#f0e6d2</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Satellite Secondary</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color5" value="#d9a066" onchange="updateColor('color5', this.value)">
+                        <span class="color-value" id="color5-value">#d9a066</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Actions Section (ALWAYS KEEP THIS) -->
@@ -576,6 +596,7 @@
                 <div class="button-row">
                     <button class="button" onclick="resetParameters()">Reset</button>
                 </div>
+                <button class="button secondary share-button" id="share-button" onclick="copyShareLink()">🔗 Copy Share Link</button>
             </div>
         </div>
 
@@ -608,13 +629,79 @@
             trailFade: 35,
             sizeScale: 0.85,
             lineWeight: 1.0,
-            colorPalette: ['#f0e6d2', '#d9a066', '#2b1f14']
+            // main primary, main secondary, background, satellite primary,
+            // satellite secondary (satellites default to the main colors)
+            colorPalette: ['#f0e6d2', '#d9a066', '#2b1f14', '#f0e6d2', '#d9a066']
         };
 
         let defaultParams = {
             ...params,
             colorPalette: [...params.colorPalette]
         };
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SHAREABLE LINKS - every setting fits in the URL hash, so a copied
+        // link reproduces this exact configuration on load
+        // ═══════════════════════════════════════════════════════════════════════
+
+        const INT_PARAMS = ['seed', 'axisCount', 'branchDepth', 'linesPerShape',
+                            'layerCount', 'trailFade', 'satelliteCount'];
+        const SHARE_KEYS = ['seed', 'axisCount', 'branchDepth', 'branchScale', 'linesPerShape',
+                            'layerCount', 'satelliteCount', 'satelliteSize', 'orbitDistance',
+                            'orbitSpeed', 'rotationSpeed', 'breathAmount', 'trailFade',
+                            'sizeScale', 'lineWeight'];
+
+        function applyParamsFromURL() {
+            if (location.hash.length < 2) return;
+            let qs = new URLSearchParams(location.hash.slice(1));
+            for (let key of SHARE_KEYS) {
+                if (!qs.has(key)) continue;
+                let v = INT_PARAMS.includes(key) ? parseInt(qs.get(key)) : parseFloat(qs.get(key));
+                if (!isFinite(v)) continue;
+                if (key === 'seed') {
+                    if (v >= 1) params.seed = v;
+                } else {
+                    // clamp to the matching slider's range
+                    let el = document.getElementById(key);
+                    params[key] = Math.min(parseFloat(el.max), Math.max(parseFloat(el.min), v));
+                }
+            }
+            for (let i = 0; i < params.colorPalette.length; i++) {
+                let c = qs.get('c' + (i + 1));
+                if (c && /^[0-9a-fA-F]{6}$/.test(c)) {
+                    params.colorPalette[i] = '#' + c.toLowerCase();
+                }
+            }
+        }
+        applyParamsFromURL();
+
+        function buildShareLink() {
+            let qs = new URLSearchParams();
+            for (let key of SHARE_KEYS) {
+                qs.set(key, params[key]);
+            }
+            for (let i = 0; i < params.colorPalette.length; i++) {
+                qs.set('c' + (i + 1), params.colorPalette[i].slice(1));
+            }
+            return location.origin + location.pathname + location.search + '#' + qs.toString();
+        }
+
+        function copyShareLink() {
+            let url = buildShareLink();
+            // keep the address bar in sync so a plain copy of it works too
+            history.replaceState(null, '', '#' + url.split('#')[1]);
+            let confirmCopied = () => {
+                let btn = document.getElementById('share-button');
+                let original = btn.textContent;
+                btn.textContent = '✓ Link Copied';
+                setTimeout(() => { btn.textContent = original; }, 1600);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(confirmCopied, () => prompt('Copy this link:', url));
+            } else {
+                prompt('Copy this link:', url);
+            }
+        }
 
         // ═══════════════════════════════════════════════════════════════════════
         // P5.JS GENERATIVE The Sacred Loop
@@ -781,9 +868,8 @@
         //   R         outer radius of this structure
         //   cfg       { spokes, layerCount, d, speedMult, spinBias, flip }
         function drawStructure(ox, oy, R, cfg) {
-            const { c1, c2, breath, useGlow } = frameState;
-            const spokes = cfg.spokes;
-            const d = cfg.d;
+            const { breath, useGlow } = frameState;
+            const { c1, c2, spokes, d } = cfg;
 
             for (let L = cfg.layerCount - 1; L >= 0; L--) {
                 let dir = ((L % 2 === 0) ? 1 : -1) * cfg.flip;
@@ -864,6 +950,8 @@
             let d = Math.round(params.linesPerShape);
             let c1 = color(params.colorPalette[0]);
             let c2 = color(params.colorPalette[1]);
+            let satC1 = color(params.colorPalette[3]);
+            let satC2 = color(params.colorPalette[4]);
 
             let S = params.satelliteCount;
 
@@ -874,7 +962,9 @@
                 d: d,
                 speedMult: 1,
                 spinBias: 0,
-                flip: 1
+                flip: 1,
+                c1: c1,
+                c2: c2
             };
 
             // Each satellite: its own seeded configuration, density scaled
@@ -889,7 +979,9 @@
                     d: constrain(Math.round(d * c.densityMult), 4, 40),
                     speedMult: c.speedMult,
                     spinBias: c.spinBias,
-                    flip: c.flip * ((k % 2 === 0) ? 1 : -1)
+                    flip: c.flip * ((k % 2 === 0) ? 1 : -1),
+                    c1: satC1,
+                    c2: satC2
                 });
             }
 
@@ -906,7 +998,7 @@
                 breath.push(1 + params.breathAmount * sin(t * 0.8 * Math.pow(PHI, g % 2 ? 1 : 0) + breathPhases[g] + g * 1.7));
             }
 
-            frameState = { c1, c2, breath, useGlow };
+            frameState = { breath, useGlow };
 
             // Auto-fit: shrink the central structure so the orbiting
             // satellites never leave the canvas.
@@ -943,13 +1035,12 @@
         }
 
         function updateParam(paramName, value) {
-            const intParams = ['axisCount', 'branchDepth', 'linesPerShape', 'layerCount', 'trailFade', 'satelliteCount'];
-            params[paramName] = intParams.includes(paramName) ? parseInt(value) : parseFloat(value);
+            params[paramName] = INT_PARAMS.includes(paramName) ? parseInt(value) : parseFloat(value);
             document.getElementById(paramName + '-value').textContent = value;
         }
 
         function updateColor(colorId, value) {
-            const idx = { color1: 0, color2: 1, color3: 2 }[colorId];
+            const idx = { color1: 0, color2: 1, color3: 2, color4: 3, color5: 4 }[colorId];
             params.colorPalette[idx] = value;
             document.getElementById(colorId + '-value').textContent = value;
             if (colorId === 'color3') {
@@ -994,9 +1085,7 @@
             initializeSystem();
         }
 
-        function resetParameters() {
-            params = { ...defaultParams, colorPalette: [...defaultParams.colorPalette] };
-
+        function syncControlsToParams() {
             const sliders = ['axisCount', 'branchDepth', 'branchScale', 'linesPerShape',
                              'layerCount', 'satelliteCount', 'satelliteSize', 'orbitDistance',
                              'orbitSpeed', 'rotationSpeed', 'breathAmount', 'trailFade',
@@ -1006,20 +1095,25 @@
                 document.getElementById(s + '-value').textContent = params[s];
             }
 
-            document.getElementById('color1').value = params.colorPalette[0];
-            document.getElementById('color1-value').textContent = params.colorPalette[0];
-            document.getElementById('color2').value = params.colorPalette[1];
-            document.getElementById('color2-value').textContent = params.colorPalette[1];
-            document.getElementById('color3').value = params.colorPalette[2];
-            document.getElementById('color3-value').textContent = params.colorPalette[2];
+            for (let i = 0; i < params.colorPalette.length; i++) {
+                document.getElementById('color' + (i + 1)).value = params.colorPalette[i];
+                document.getElementById('color' + (i + 1) + '-value').textContent = params.colorPalette[i];
+            }
 
             updateSeedDisplay();
+        }
+
+        function resetParameters() {
+            params = { ...defaultParams, colorPalette: [...defaultParams.colorPalette] };
+            // a reset also clears any settings carried in the URL
+            history.replaceState(null, '', location.pathname + location.search);
+            syncControlsToParams();
             initializeSystem();
         }
 
-        // Initialize UI on load
+        // Initialize UI on load (params may have come from a share link)
         window.addEventListener('load', function() {
-            updateSeedDisplay();
+            syncControlsToParams();
         });
     </script>
 </body>
