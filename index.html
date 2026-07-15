@@ -35,7 +35,7 @@
 
         .container {
             display: flex;
-            min-height: 100vh;
+            height: 100vh;
             padding: 20px;
             gap: 20px;
         }
@@ -59,6 +59,59 @@
             font-weight: 500;
             color: var(--anthropic-dark);
             margin-bottom: 8px;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .icon-button {
+            background: var(--anthropic-light);
+            border: 1px solid var(--anthropic-light-gray);
+            color: var(--anthropic-dark);
+            border-radius: 6px;
+            width: 32px;
+            height: 32px;
+            flex-shrink: 0;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .icon-button:hover {
+            border-color: var(--anthropic-orange);
+            color: var(--anthropic-orange);
+        }
+
+        /* Floating button to bring the sidebar back in fullscreen mode */
+        .sidebar-show {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            z-index: 10;
+            display: none;
+            box-shadow: 0 4px 12px rgba(20, 20, 19, 0.15);
+        }
+
+        body.sidebar-hidden .sidebar {
+            display: none;
+        }
+
+        body.sidebar-hidden .sidebar-show {
+            display: block;
+        }
+
+        body.sidebar-hidden .container {
+            padding: 0;
+            gap: 0;
+        }
+
+        body.sidebar-hidden #canvas-container {
+            border-radius: 0;
         }
 
         .sidebar .subtitle {
@@ -272,6 +325,10 @@
             flex: 1;
         }
 
+        .share-button {
+            margin-top: 8px;
+        }
+
         /* Canvas Area */
         .canvas-area {
             flex: 1;
@@ -282,8 +339,10 @@
         }
 
         #canvas-container {
+            /* Fill the whole area beside the sidebar; the p5 canvas is
+               resized to match via JS so the artwork never distorts */
             width: 100%;
-            max-width: 1000px;
+            height: 100%;
             border-radius: 12px;
             overflow: hidden;
             box-shadow: 0 20px 40px rgba(20, 20, 19, 0.1);
@@ -293,7 +352,7 @@
         #canvas-container canvas {
             display: block;
             width: 100% !important;
-            height: auto !important;
+            height: 100% !important;
         }
 
         /* Loading State */
@@ -309,6 +368,8 @@
         @media (max-width: 600px) {
             .container {
                 flex-direction: column;
+                height: auto;
+                min-height: 100vh;
             }
 
             .sidebar {
@@ -318,14 +379,24 @@
             .canvas-area {
                 padding: 20px;
             }
+
+            /* Stacked layout has no fixed height, so keep the canvas square */
+            #canvas-container {
+                height: auto;
+                aspect-ratio: 1 / 1;
+            }
         }
     </style>
 </head>
 <body>
+    <button class="icon-button sidebar-show" onclick="toggleSidebar()" title="Show controls">▶</button>
     <div class="container">
         <!-- Control Sidebar -->
         <div class="sidebar">
-            <h1>The Sacred Loop</h1>
+            <div class="sidebar-header">
+                <h1>The Sacred Loop</h1>
+                <button class="icon-button" onclick="toggleSidebar()" title="Hide controls (fullscreen)">◀</button>
+            </div>
             <div class="subtitle">Radial axes stitched with The Sacred Loop woven from lines that only pretend to curve.</div>
 
             <!-- Seed Section (ALWAYS KEEP THIS) -->
@@ -501,6 +572,22 @@
                         <span class="color-value" id="color3-value">#2b1f14</span>
                     </div>
                 </div>
+
+                <div class="color-group">
+                    <label>Satellite Primary</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color4" value="#f0e6d2" onchange="updateColor('color4', this.value)">
+                        <span class="color-value" id="color4-value">#f0e6d2</span>
+                    </div>
+                </div>
+
+                <div class="color-group">
+                    <label>Satellite Secondary</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="color5" value="#d9a066" onchange="updateColor('color5', this.value)">
+                        <span class="color-value" id="color5-value">#d9a066</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Actions Section (ALWAYS KEEP THIS) -->
@@ -509,6 +596,7 @@
                 <div class="button-row">
                     <button class="button" onclick="resetParameters()">Reset</button>
                 </div>
+                <button class="button secondary share-button" id="share-button" onclick="copyShareLink()">🔗 Copy Share Link</button>
             </div>
         </div>
 
@@ -541,13 +629,79 @@
             trailFade: 35,
             sizeScale: 0.85,
             lineWeight: 1.0,
-            colorPalette: ['#f0e6d2', '#d9a066', '#2b1f14']
+            // main primary, main secondary, background, satellite primary,
+            // satellite secondary (satellites default to the main colors)
+            colorPalette: ['#f0e6d2', '#d9a066', '#2b1f14', '#f0e6d2', '#d9a066']
         };
 
         let defaultParams = {
             ...params,
             colorPalette: [...params.colorPalette]
         };
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SHAREABLE LINKS - every setting fits in the URL hash, so a copied
+        // link reproduces this exact configuration on load
+        // ═══════════════════════════════════════════════════════════════════════
+
+        const INT_PARAMS = ['seed', 'axisCount', 'branchDepth', 'linesPerShape',
+                            'layerCount', 'trailFade', 'satelliteCount'];
+        const SHARE_KEYS = ['seed', 'axisCount', 'branchDepth', 'branchScale', 'linesPerShape',
+                            'layerCount', 'satelliteCount', 'satelliteSize', 'orbitDistance',
+                            'orbitSpeed', 'rotationSpeed', 'breathAmount', 'trailFade',
+                            'sizeScale', 'lineWeight'];
+
+        function applyParamsFromURL() {
+            if (location.hash.length < 2) return;
+            let qs = new URLSearchParams(location.hash.slice(1));
+            for (let key of SHARE_KEYS) {
+                if (!qs.has(key)) continue;
+                let v = INT_PARAMS.includes(key) ? parseInt(qs.get(key)) : parseFloat(qs.get(key));
+                if (!isFinite(v)) continue;
+                if (key === 'seed') {
+                    if (v >= 1) params.seed = v;
+                } else {
+                    // clamp to the matching slider's range
+                    let el = document.getElementById(key);
+                    params[key] = Math.min(parseFloat(el.max), Math.max(parseFloat(el.min), v));
+                }
+            }
+            for (let i = 0; i < params.colorPalette.length; i++) {
+                let c = qs.get('c' + (i + 1));
+                if (c && /^[0-9a-fA-F]{6}$/.test(c)) {
+                    params.colorPalette[i] = '#' + c.toLowerCase();
+                }
+            }
+        }
+        applyParamsFromURL();
+
+        function buildShareLink() {
+            let qs = new URLSearchParams();
+            for (let key of SHARE_KEYS) {
+                qs.set(key, params[key]);
+            }
+            for (let i = 0; i < params.colorPalette.length; i++) {
+                qs.set('c' + (i + 1), params.colorPalette[i].slice(1));
+            }
+            return location.origin + location.pathname + location.search + '#' + qs.toString();
+        }
+
+        function copyShareLink() {
+            let url = buildShareLink();
+            // keep the address bar in sync so a plain copy of it works too
+            history.replaceState(null, '', '#' + url.split('#')[1]);
+            let confirmCopied = () => {
+                let btn = document.getElementById('share-button');
+                let original = btn.textContent;
+                btn.textContent = '✓ Link Copied';
+                setTimeout(() => { btn.textContent = original; }, 1600);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(confirmCopied, () => prompt('Copy this link:', url));
+            } else {
+                prompt('Copy this link:', url);
+            }
+        }
 
         // ═══════════════════════════════════════════════════════════════════════
         // P5.JS GENERATIVE The Sacred Loop
@@ -592,28 +746,52 @@
         let breathPhases = [];
         let satPhase = 0;
         let satConfigs = [];
+        let seedTraits = { weaveExp: 1, layerScale: 0.78, skip: 1 };
         const PHI = 1.6180339887498948;
         const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-        const LAYER_SCALE = 0.78;   // size ratio between stacked stars
         const MAX_LAYERS = 5;
         const MAX_GENS = 4;
         const MAX_SATS = 6;
 
+        function containerSize() {
+            let el = document.getElementById('canvas-container');
+            return [Math.max(el.clientWidth, 100), Math.max(el.clientHeight, 100)];
+        }
+
         function setup() {
-            let canvas = createCanvas(1200, 1200);
+            let [w, h] = containerSize();
+            let canvas = createCanvas(w, h);
             canvas.parent('canvas-container');
             initializeSystem();
             document.querySelector('.loading').style.display = 'none';
+        }
+
+        function windowResized() {
+            let [w, h] = containerSize();
+            resizeCanvas(w, h);
+            background(params.colorPalette[2]); // resize clears trails anyway
         }
 
         function initializeSystem() {
             randomSeed(params.seed);
             noiseSeed(params.seed);
 
+            // Seed-defined character of the whole composition: how sharply
+            // the thread envelopes curve, how tightly the stacked stars
+            // nest, and whether threads stitch adjacent spokes or leap
+            // across one (which weaves a crossing star-polygon lattice).
+            seedTraits = {
+                weaveExp: random(0.55, 1.7),
+                layerScale: random(0.62, 0.9),
+                skip: random() < 0.75 ? 1 : 2
+            };
+
             // Each layer inherits a fixed angular offset from the golden angle
             // plus seeded jitter, so stacked stars interleave, never align.
-            layerOffsets = [];
-            for (let L = 0; L < MAX_LAYERS; L++) {
+            // Layer 0 stays at zero so the outermost star points straight up
+            // whenever rotation is stopped.
+            layerOffsets = [0];
+            for (let L = 1; L < MAX_LAYERS; L++) {
                 layerOffsets.push((params.seed * GOLDEN_ANGLE + L * GOLDEN_ANGLE) % TWO_PI + random(-0.3, 0.3));
             }
 
@@ -658,8 +836,10 @@
         function buildSpokes(axisCount, branchDepth, branchScale) {
             let spokes = [];
             let n = axisCount;
+            // Spoke 0 points straight up (-90°) so the structure reads as
+            // vertically aligned whenever rotation is zero.
             for (let i = 0; i < n; i++) {
-                spokes.push({ angle: (TWO_PI * i) / n, len: 1, gen: 0 });
+                spokes.push({ angle: (-HALF_PI + (TWO_PI * i) / n + TWO_PI) % TWO_PI, len: 1, gen: 0 });
             }
             for (let g = 1; g <= branchDepth; g++) {
                 spokes.sort((a, b) => a.angle - b.angle);
@@ -688,15 +868,14 @@
         //   R         outer radius of this structure
         //   cfg       { spokes, layerCount, d, speedMult, spinBias, flip }
         function drawStructure(ox, oy, R, cfg) {
-            const { c1, c2, breath, useGlow } = frameState;
-            const spokes = cfg.spokes;
-            const d = cfg.d;
+            const { breath, useGlow } = frameState;
+            const { c1, c2, spokes, d } = cfg;
 
             for (let L = cfg.layerCount - 1; L >= 0; L--) {
                 let dir = ((L % 2 === 0) ? 1 : -1) * cfg.flip;
                 let speed = params.rotationSpeed * 0.3 * (1 + L * 0.22) * cfg.speedMult;
                 let rot = layerOffsets[L] + cfg.spinBias + t * speed * dir;
-                let scale = Math.pow(LAYER_SCALE, L) * R;
+                let scale = Math.pow(seedTraits.layerScale, L) * R;
 
                 // Layer color: outermost = primary, inner layers shade toward
                 // secondary; inner layers slightly brighter to read on top.
@@ -723,10 +902,12 @@
                 // 2. The stitching: straight chords woven between adjacent spokes
                 for (let i = 0; i < tips.length; i++) {
                     let A = tips[i];
-                    let B = tips[(i + 1) % tips.length];
+                    let B = tips[(i + seedTraits.skip) % tips.length];
                     for (let j = 0; j < d; j++) {
-                        let fA = (d - j) / d;   // slides down spoke A
-                        let fB = (j + 1) / d;   // slides up spoke B
+                        // weaveExp warps how fast the anchors slide along
+                        // their spokes, bending the envelope's curvature
+                        let fA = Math.pow((d - j) / d, seedTraits.weaveExp);   // slides down spoke A
+                        let fB = Math.pow((j + 1) / d, seedTraits.weaveExp);   // slides up spoke B
                         let x1 = ox + (A.x - ox) * fA;
                         let y1 = oy + (A.y - oy) * fA;
                         let x2 = ox + (B.x - ox) * fB;
@@ -769,6 +950,8 @@
             let d = Math.round(params.linesPerShape);
             let c1 = color(params.colorPalette[0]);
             let c2 = color(params.colorPalette[1]);
+            let satC1 = color(params.colorPalette[3]);
+            let satC2 = color(params.colorPalette[4]);
 
             let S = params.satelliteCount;
 
@@ -779,7 +962,9 @@
                 d: d,
                 speedMult: 1,
                 spinBias: 0,
-                flip: 1
+                flip: 1,
+                c1: c1,
+                c2: c2
             };
 
             // Each satellite: its own seeded configuration, density scaled
@@ -794,7 +979,9 @@
                     d: constrain(Math.round(d * c.densityMult), 4, 40),
                     speedMult: c.speedMult,
                     spinBias: c.spinBias,
-                    flip: c.flip * ((k % 2 === 0) ? 1 : -1)
+                    flip: c.flip * ((k % 2 === 0) ? 1 : -1),
+                    c1: satC1,
+                    c2: satC2
                 });
             }
 
@@ -811,7 +998,7 @@
                 breath.push(1 + params.breathAmount * sin(t * 0.8 * Math.pow(PHI, g % 2 ? 1 : 0) + breathPhases[g] + g * 1.7));
             }
 
-            frameState = { c1, c2, breath, useGlow };
+            frameState = { breath, useGlow };
 
             // Auto-fit: shrink the central structure so the orbiting
             // satellites never leave the canvas.
@@ -840,14 +1027,20 @@
         // UI CONTROL HANDLERS
         // ═══════════════════════════════════════════════════════════════════════
 
+        function toggleSidebar() {
+            document.body.classList.toggle('sidebar-hidden');
+            if (typeof resizeCanvas === 'function' && width) {
+                windowResized(); // canvas area changed size
+            }
+        }
+
         function updateParam(paramName, value) {
-            const intParams = ['axisCount', 'branchDepth', 'linesPerShape', 'layerCount', 'trailFade', 'satelliteCount'];
-            params[paramName] = intParams.includes(paramName) ? parseInt(value) : parseFloat(value);
+            params[paramName] = INT_PARAMS.includes(paramName) ? parseInt(value) : parseFloat(value);
             document.getElementById(paramName + '-value').textContent = value;
         }
 
         function updateColor(colorId, value) {
-            const idx = { color1: 0, color2: 1, color3: 2 }[colorId];
+            const idx = { color1: 0, color2: 1, color3: 2, color4: 3, color5: 4 }[colorId];
             params.colorPalette[idx] = value;
             document.getElementById(colorId + '-value').textContent = value;
             if (colorId === 'color3') {
@@ -892,9 +1085,7 @@
             initializeSystem();
         }
 
-        function resetParameters() {
-            params = { ...defaultParams, colorPalette: [...defaultParams.colorPalette] };
-
+        function syncControlsToParams() {
             const sliders = ['axisCount', 'branchDepth', 'branchScale', 'linesPerShape',
                              'layerCount', 'satelliteCount', 'satelliteSize', 'orbitDistance',
                              'orbitSpeed', 'rotationSpeed', 'breathAmount', 'trailFade',
@@ -904,20 +1095,25 @@
                 document.getElementById(s + '-value').textContent = params[s];
             }
 
-            document.getElementById('color1').value = params.colorPalette[0];
-            document.getElementById('color1-value').textContent = params.colorPalette[0];
-            document.getElementById('color2').value = params.colorPalette[1];
-            document.getElementById('color2-value').textContent = params.colorPalette[1];
-            document.getElementById('color3').value = params.colorPalette[2];
-            document.getElementById('color3-value').textContent = params.colorPalette[2];
+            for (let i = 0; i < params.colorPalette.length; i++) {
+                document.getElementById('color' + (i + 1)).value = params.colorPalette[i];
+                document.getElementById('color' + (i + 1) + '-value').textContent = params.colorPalette[i];
+            }
 
             updateSeedDisplay();
+        }
+
+        function resetParameters() {
+            params = { ...defaultParams, colorPalette: [...defaultParams.colorPalette] };
+            // a reset also clears any settings carried in the URL
+            history.replaceState(null, '', location.pathname + location.search);
+            syncControlsToParams();
             initializeSystem();
         }
 
-        // Initialize UI on load
+        // Initialize UI on load (params may have come from a share link)
         window.addEventListener('load', function() {
-            updateSeedDisplay();
+            syncControlsToParams();
         });
     </script>
 </body>
