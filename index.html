@@ -35,7 +35,7 @@
 
         .container {
             display: flex;
-            min-height: 100vh;
+            height: 100vh;
             padding: 20px;
             gap: 20px;
         }
@@ -59,6 +59,60 @@
             font-weight: 500;
             color: var(--anthropic-dark);
             margin-bottom: 8px;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .icon-button {
+            background: var(--anthropic-light);
+            border: 1px solid var(--anthropic-light-gray);
+            color: var(--anthropic-dark);
+            border-radius: 6px;
+            width: 32px;
+            height: 32px;
+            flex-shrink: 0;
+            font-size: 14px;
+            line-height: 1;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .icon-button:hover {
+            border-color: var(--anthropic-orange);
+            color: var(--anthropic-orange);
+        }
+
+        /* Floating button to bring the sidebar back in fullscreen mode */
+        .sidebar-show {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            z-index: 10;
+            display: none;
+            box-shadow: 0 4px 12px rgba(20, 20, 19, 0.15);
+        }
+
+        body.sidebar-hidden .sidebar {
+            display: none;
+        }
+
+        body.sidebar-hidden .sidebar-show {
+            display: block;
+        }
+
+        body.sidebar-hidden .container {
+            padding: 0;
+            gap: 0;
+        }
+
+        body.sidebar-hidden #canvas-container {
+            width: min(100vw, 100vh);
+            border-radius: 0;
         }
 
         .sidebar .subtitle {
@@ -282,8 +336,9 @@
         }
 
         #canvas-container {
-            width: 100%;
-            max-width: 1000px;
+            /* Square canvas: fill all available width, capped only by
+               viewport height (container padding accounted for) */
+            width: min(100%, calc(100vh - 40px));
             border-radius: 12px;
             overflow: hidden;
             box-shadow: 0 20px 40px rgba(20, 20, 19, 0.1);
@@ -309,6 +364,8 @@
         @media (max-width: 600px) {
             .container {
                 flex-direction: column;
+                height: auto;
+                min-height: 100vh;
             }
 
             .sidebar {
@@ -322,10 +379,14 @@
     </style>
 </head>
 <body>
+    <button class="icon-button sidebar-show" onclick="toggleSidebar()" title="Show controls">▶</button>
     <div class="container">
         <!-- Control Sidebar -->
         <div class="sidebar">
-            <h1>The Sacred Loop</h1>
+            <div class="sidebar-header">
+                <h1>The Sacred Loop</h1>
+                <button class="icon-button" onclick="toggleSidebar()" title="Hide controls (fullscreen)">◀</button>
+            </div>
             <div class="subtitle">Radial axes stitched with The Sacred Loop woven from lines that only pretend to curve.</div>
 
             <!-- Seed Section (ALWAYS KEEP THIS) -->
@@ -600,7 +661,7 @@
         const MAX_SATS = 6;
 
         function setup() {
-            let canvas = createCanvas(1200, 1200);
+            let canvas = createCanvas(1600, 1600);
             canvas.parent('canvas-container');
             initializeSystem();
             document.querySelector('.loading').style.display = 'none';
@@ -839,6 +900,10 @@
         // ═══════════════════════════════════════════════════════════════════════
         // UI CONTROL HANDLERS
         // ═══════════════════════════════════════════════════════════════════════
+
+        function toggleSidebar() {
+            document.body.classList.toggle('sidebar-hidden');
+        }
 
         function updateParam(paramName, value) {
             const intParams = ['axisCount', 'branchDepth', 'linesPerShape', 'layerCount', 'trailFade', 'satelliteCount'];
