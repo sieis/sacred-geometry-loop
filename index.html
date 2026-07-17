@@ -667,6 +667,7 @@
                     <button class="button" onclick="resetParameters()">Reset</button>
                 </div>
                 <button class="button secondary share-button" id="share-button" onclick="copyShareLink()">🔗 Copy Share Link</button>
+                <button class="button tertiary share-button" onclick="captureScreenshot()">📷 Capture Screenshot</button>
             </div>
         </div>
 
@@ -778,10 +779,10 @@
         const MAIN_CONTROLS = [
             { key: 'sizeScale', label: 'Size', hint: 'overall zoom — the design may overflow the canvas', min: 0.2, max: 3, step: 0.05, share: 'msz' },
             { key: 'depth3d',   label: '3D Effect', hint: 'tilts the structure and separates its layers in depth', min: 0, max: 1, step: 0.01, share: 'm3d' },
-            { key: 'depthFade', label: 'Depth Fade', hint: 'fades line opacity toward the center to fake depth', min: 0, max: 1, step: 0.01, share: 'mdf' },
-            { key: 'axisGlow',  label: 'Axis Highlight', hint: 'brightens the main axes so the corners read as 3D edges', min: 0, max: 1, step: 0.01, share: 'mag' },
+            { key: 'depthFade', label: 'Depth Fade', hint: 'fades the outer edges to transparency in a circular gradient — max leaves only a central orb', min: 0, max: 1, step: 0.01, share: 'mdf' },
+            { key: 'axisGlow',  label: 'Axis Highlight', hint: 'brightens every axis (branches included) so the corners read as 3D edges', min: 0, max: 1, step: 0.01, share: 'mag' },
             { key: 'shaderAmount',   label: 'Core Shader', hint: 'tints threads near the origin with the shader color, carving an inner shape', min: 0, max: 1, step: 0.01, share: 'msa' },
-            { key: 'shaderRadius',   label: 'Shader Radius', hint: 'how far out from the origin the tint reaches', min: 0.05, max: 1.5, step: 0.01, share: 'msr' },
+            { key: 'shaderRadius',   label: 'Shader Radius', hint: 'the tint grows from the origin out to this radius', min: 0.05, max: 1.5, step: 0.01, share: 'msr' },
             { key: 'shaderSoftness', label: 'Shader Softness', hint: '0 = hard edge, 1 = long gradient', min: 0, max: 1, step: 0.01, share: 'mss' }
         ];
 
@@ -998,12 +999,17 @@
         //      each frame. The 3D slider tilts a structure out of plane and
         //      fans its layers apart in z, with perspective scaling plus
         //      depth-cued brightness and line weight. Two companion sliders
-        //      fake depth without tilting: Depth Fade thins line opacity
-        //      toward the origin, and Axis Highlight pushes the main spokes
-        //      toward bright white so the corners read as 3D edges. The
+        //      fake depth without tilting: Depth Fade dissolves the drawing
+        //      to transparency in a circular gradient that closes in from
+        //      the outer edges (maxed out, only a central orb survives),
+        //      and Axis Highlight pushes every spoke — branch axes included
+        //      — toward bright white so the corners read as 3D edges. The
         //      Core Shader tints threads by distance from the origin —
         //      amount, radius, softness and a color of its own — so the
-        //      color carves an inner shape out of the form. A global fill toggle
+        //      color carves an inner shape out of the form. Both radial
+        //      effects are painted per segment along each line, so a single
+        //      thread can pass through tinted, faded and untouched zones. A
+        //      global fill toggle
         //      paints the region the threads cover — bounded by their
         //      envelope curves — in a chosen fill color so the space
         //      between the threads reads solid instead of see-through.
@@ -1216,13 +1222,42 @@
             const { useGlow } = frameState;
             const d = cfg.d;
             const nTotal = cfg.totalLayers || cfg.layers.length;
-            // Faked depth: depthFade thins line opacity toward the origin,
-            // axisGlow brightens the gen-0 spokes, and the core shader
-            // tints threads by their distance from the origin so the color
-            // itself carves an inner shape out of the form.
+            // Faked depth: depthFade dissolves the drawing to transparency
+            // in a circular gradient closing in from the outer edges,
+            // axisGlow brightens every spoke, and the core shader tints
+            // threads by their distance from the origin so the color itself
+            // carves an inner shape out of the form. Both radial effects
+            // are evaluated per segment along each line, so one thread can
+            // fade or change color along its own length.
             const depthFade = cfg.depthFade || 0;
             const axisGlow = cfg.axisGlow || 0;
             const sh = cfg.shader || null;
+
+            // Fully opaque inside fadeStart·R, fully transparent beyond
+            // fadeEnd·R; cranking the slider pulls the whole band inward
+            // until only a central orb survives at the maximum.
+            const fadeStart = 1.1 - depthFade;
+            const fadeEnd = fadeStart + 0.4;
+            const radialAlpha = (nd) => {
+                if (depthFade <= 0) return 1;
+                let tt = (nd - fadeStart) / (fadeEnd - fadeStart);
+                tt = Math.min(1, Math.max(0, tt));
+                return 1 - tt * tt * (3 - 2 * tt);
+            };
+
+            // Blend weight toward the shader color: full inside the
+            // softness band, easing to zero at the shader radius.
+            const shaderW = (nd) => {
+                if (!sh) return 0;
+                let e1 = sh.radius;
+                let e0 = e1 * (1 - sh.softness);
+                let tt = nd >= e1 ? 1 : nd <= e0 ? 0 : (nd - e0) / (e1 - e0);
+                return sh.amount * (1 - tt * tt * (3 - 2 * tt));
+            };
+
+            // Segments per line: 1 collapses to plain lines when neither
+            // radial effect is active
+            const SEGS = (depthFade > 0 || sh) ? 6 : 1;
 
             // Anchor fractions along each pair of spokes; chord j runs from
             // fraction (d-j)/d of spoke A to fraction (j+1)/d of spoke B.
@@ -1316,24 +1351,33 @@
                 }
 
                 // 1. The frame: the spokes themselves, faint — unless the
-                // axis highlight is up, which pushes the main (gen-0) axes
-                // toward bright white so the corners read as 3D edges
-                for (let si = 0; si < tips.length; si++) {
-                    let [tx, ty] = proj(tips[si].x, tips[si].y);
-                    if (axisGlow > 0 && spokes[si].gen === 0) {
-                        g.stroke(
-                            r0 + (255 - r0) * axisGlow,
-                            g0 + (255 - g0) * axisGlow,
-                            b0 + (255 - b0) * axisGlow,
-                            70 + 185 * axisGlow
-                        );
-                        g.strokeWeight(lineWeight * (0.8 + 2.4 * axisGlow));
-                    } else {
-                        g.stroke(r0, g0, b0, 70);
-                        g.strokeWeight(lineWeight * 0.8);
+                // axis highlight is up, which pushes every axis (branch
+                // generations included) toward bright white so the corners
+                // read as 3D edges. Spokes fade with depth fade too, so a
+                // highlighted axis still dissolves past the fade radius.
+                // Highlighted axes are painted after the stitching so they
+                // stay continuous instead of being chopped up by the
+                // threads crossing them.
+                const drawFrame = () => {
+                    let spokeR = r0 + (255 - r0) * axisGlow;
+                    let spokeG = g0 + (255 - g0) * axisGlow;
+                    let spokeB = b0 + (255 - b0) * axisGlow;
+                    let spokeA = 70 + 185 * axisGlow;
+                    g.strokeWeight(lineWeight * (0.8 + 2.4 * axisGlow));
+                    for (let tip of tips) {
+                        for (let s = 0; s < SEGS; s++) {
+                            let f0 = s / SEGS, f1 = (s + 1) / SEGS;
+                            let nd = Math.hypot(tip.x, tip.y) * (f0 + f1) / 2 / R;
+                            let aMul = radialAlpha(nd);
+                            if (aMul <= 0.004) continue;
+                            let [x0, y0] = proj(tip.x * f0, tip.y * f0);
+                            let [x1, y1] = proj(tip.x * f1, tip.y * f1);
+                            g.stroke(spokeR, spokeG, spokeB, spokeA * aMul);
+                            g.line(x0, y0, x1, y1);
+                        }
                     }
-                    g.line(pcx, pcy, tx, ty);
-                }
+                };
+                if (axisGlow <= 0) drawFrame();
 
                 // 2. The stitching: straight chords woven between adjacent spokes
                 for (let i = 0; i < tips.length; i++) {
@@ -1344,50 +1388,50 @@
                         let fB = fr[j][1];   // slides up spoke B
                         let ax = A.x * fA, ay = A.y * fA;
                         let bx = B.x * fB, by = B.y * fB;
-                        let [x1, y1, s1] = proj(ax, ay);
-                        let [x2, y2, s2] = proj(bx, by);
-                        let sAvg = (s1 + s2) / 2;
 
-                        // radial position of the chord's midpoint as a
-                        // fraction of the structure radius — drives both
-                        // the depth fade and the core shader
-                        let nd = Math.hypot(ax + bx, ay + by) / (2 * R);
-
-                        // thread brightens toward the envelope's vertex,
-                        // and nearer (larger) depth reads brighter/thicker
+                        // thread brightens toward the envelope's vertex
                         let v = 1 - Math.abs(j / (d - 1) - 0.5) * 2;
-                        let depthCue = Math.min(1.25, Math.max(0.55, sAvg));
-                        let aMul = 1 - depthFade * (0.3 + 0.62 * Math.max(0, 1 - nd));
-                        let a = Math.min(255, (90 + 130 * v) * depthCue) * aMul;
 
-                        // core shader: blend the thread color toward the
-                        // shader color inside the radius, easing out over
-                        // the softness band
-                        let cr = r0, cg = g0, cb = b0;
-                        if (sh) {
-                            let e1 = sh.radius;
-                            let e0 = e1 * (1 - sh.softness);
-                            let tt = nd >= e1 ? 1 : nd <= e0 ? 0 : (nd - e0) / (e1 - e0);
-                            tt = tt * tt * (3 - 2 * tt);
-                            let w = sh.amount * (1 - tt);
+                        // Each segment carries its own radial position, so
+                        // the depth fade and shader tint sweep smoothly
+                        // along the thread instead of switching per line
+                        for (let s = 0; s < SEGS; s++) {
+                            let t0 = s / SEGS, t1 = (s + 1) / SEGS;
+                            let px0 = ax + (bx - ax) * t0, py0 = ay + (by - ay) * t0;
+                            let px1 = ax + (bx - ax) * t1, py1 = ay + (by - ay) * t1;
+                            let nd = Math.hypot(px0 + px1, py0 + py1) / (2 * R);
+                            let aMul = radialAlpha(nd);
+                            if (aMul <= 0.004) continue;
+
+                            let [x1, y1, s1] = proj(px0, py0);
+                            let [x2, y2, s2] = proj(px1, py1);
+
+                            // nearer (larger) depth reads brighter/thicker
+                            let depthCue = Math.min(1.25, Math.max(0.55, (s1 + s2) / 2));
+                            let a = Math.min(255, (90 + 130 * v) * depthCue) * aMul;
+
+                            let cr = r0, cg = g0, cb = b0;
+                            let w = shaderW(nd);
                             if (w > 0) {
                                 cr += (sh.r - cr) * w;
                                 cg += (sh.g - cg) * w;
                                 cb += (sh.b - cb) * w;
                             }
-                        }
 
-                        if (useGlow) {
-                            g.stroke(cr, cg, cb, 18 * aMul);
-                            g.strokeWeight(lineWeight * 3);
+                            if (useGlow) {
+                                g.stroke(cr, cg, cb, 18 * aMul);
+                                g.strokeWeight(lineWeight * 3);
+                                g.line(x1, y1, x2, y2);
+                            }
+
+                            g.stroke(cr, cg, cb, a);
+                            g.strokeWeight(lineWeight * depthCue);
                             g.line(x1, y1, x2, y2);
                         }
-
-                        g.stroke(cr, cg, cb, a);
-                        g.strokeWeight(lineWeight * depthCue);
-                        g.line(x1, y1, x2, y2);
                     }
                 }
+
+                if (axisGlow > 0) drawFrame();
             }
         }
 
@@ -1530,6 +1574,11 @@
         // UI CONTROL HANDLERS
         // ═══════════════════════════════════════════════════════════════════════
 
+        // Save the current frame of the canvas as a PNG download
+        function captureScreenshot() {
+            saveCanvas('sacred-loop-' + params.seed, 'png');
+        }
+
         function toggleSidebar() {
             document.body.classList.toggle('sidebar-hidden');
             if (typeof resizeCanvas === 'function' && width) {
@@ -1633,6 +1682,7 @@
                         <div class="color-picker-container">
                             <span class="color-value" id="layer${i}-color-value">${lp.color}</span>
                             <input type="color" value="${lp.color}" onchange="updateLayerColor(${i}, this.value)">
+                            <button class="mini-sync" title="Sync all layers to this color" onclick="syncLayerColor(${i})">⇉</button>
                         </div>
                     </div>
                     <div class="card-body">
@@ -1661,6 +1711,15 @@
         function updateLayerColor(layerIndex, value) {
             params.layers[layerIndex].color = value;
             document.getElementById('layer' + layerIndex + '-color-value').textContent = value;
+        }
+
+        // Copy one layer's color to every other layer
+        function syncLayerColor(layerIndex) {
+            let c = params.layers[layerIndex].color;
+            for (let lp of params.layers) {
+                lp.color = c;
+            }
+            renderLayerControls();
         }
 
         function renderMainControls() {
