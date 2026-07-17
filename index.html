@@ -779,7 +779,7 @@
         const MAIN_CONTROLS = [
             { key: 'sizeScale', label: 'Size', hint: 'overall zoom — the design may overflow the canvas', min: 0.2, max: 3, step: 0.05, share: 'msz' },
             { key: 'depth3d',   label: '3D Effect', hint: 'tilts the structure and separates its layers in depth', min: 0, max: 1, step: 0.01, share: 'm3d' },
-            { key: 'depthFade', label: 'Depth Fade', hint: 'fades the outer edges to transparency in a circular gradient — max leaves only a central orb', min: 0, max: 1, step: 0.01, share: 'mdf' },
+            { key: 'depthFade', label: 'Depth Fade', hint: 'circular fade to transparency closing in from the outer edges — shrinks the visible orb down to nothing at max', min: 0, max: 1, step: 0.01, share: 'mdf' },
             { key: 'axisGlow',  label: 'Axis Highlight', hint: 'brightens every axis (branches included) so the corners read as 3D edges', min: 0, max: 1, step: 0.01, share: 'mag' },
             { key: 'shaderAmount',   label: 'Core Shader', hint: 'tints threads near the origin with the shader color, carving an inner shape', min: 0, max: 1, step: 0.01, share: 'msa' },
             { key: 'shaderRadius',   label: 'Shader Radius', hint: 'the tint grows from the origin out to this radius', min: 0.05, max: 1.5, step: 0.01, share: 'msr' },
@@ -1001,7 +1001,8 @@
         //      depth-cued brightness and line weight. Two companion sliders
         //      fake depth without tilting: Depth Fade dissolves the drawing
         //      to transparency in a circular gradient that closes in from
-        //      the outer edges (maxed out, only a central orb survives),
+        //      the outer edges — the surviving central orb shrinks with the
+        //      slider all the way down to nothing at the maximum —
         //      and Axis Highlight pushes every spoke — branch axes included
         //      — toward bright white so the corners read as 3D edges. The
         //      Core Shader tints threads by distance from the origin —
@@ -1234,9 +1235,11 @@
             const sh = cfg.shader || null;
 
             // Fully opaque inside fadeStart·R, fully transparent beyond
-            // fadeEnd·R; cranking the slider pulls the whole band inward
-            // until only a central orb survives at the maximum.
-            const fadeStart = 1.1 - depthFade;
+            // fadeEnd·R; cranking the slider pulls the whole band inward,
+            // shrinking the surviving central orb until, at the maximum,
+            // the band passes the origin and everything is transparent —
+            // so every orb size in between is selectable.
+            const fadeStart = 1.1 - 1.5 * depthFade;
             const fadeEnd = fadeStart + 0.4;
             const radialAlpha = (nd) => {
                 if (depthFade <= 0) return 1;
@@ -1269,10 +1272,11 @@
                 fr.push([(d - j) / d, (j + 1) / d]);
             }
 
-            // 3D: tilt the structure's plane (with a slow wobble) and fan
-            // the layers apart along z; perspective-project every point.
-            // depth3d = 0 collapses exactly to the flat 2D rendering.
-            const tilt = cfg.depth3d * (0.6 + 0.35 * Math.sin(t * 0.4));
+            // 3D: tilt the structure's plane to a fixed angle set by the
+            // slider and fan the layers apart along z; perspective-project
+            // every point. depth3d = 0 collapses exactly to the flat 2D
+            // rendering.
+            const tilt = cfg.depth3d * 0.85;
             const cosT = Math.cos(tilt);
             const sinT = Math.sin(tilt);
             const F = Math.max(R * 4, 1);
