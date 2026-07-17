@@ -277,6 +277,15 @@
             color: var(--anthropic-mid-gray);
         }
 
+        .color-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .color-row .color-group {
+            flex: 1;
+        }
+
         /* Per-Layer Cards */
         .layer-card {
             background: var(--anthropic-light);
@@ -567,11 +576,31 @@
             <div class="control-section">
                 <h3>Colors</h3>
 
-                <div class="color-group">
-                    <label>Background</label>
-                    <div class="color-picker-container">
-                        <input type="color" id="color1" value="#2b1f14" onchange="updateColor('color1', this.value)">
-                        <span class="color-value" id="color1-value">#2b1f14</span>
+                <div class="control-group">
+                    <div class="toggle-row">
+                        <label for="fillMode">Filled Lines</label>
+                        <label class="switch">
+                            <input type="checkbox" id="fillMode" onchange="toggleFillMode(this.checked)">
+                            <span class="switch-track"></span>
+                        </label>
+                    </div>
+                    <span class="hint">fill the space between the lines with the fill color instead of leaving it transparent</span>
+                </div>
+
+                <div class="color-row">
+                    <div class="color-group">
+                        <label>Background</label>
+                        <div class="color-picker-container">
+                            <input type="color" id="color1" value="#2b1f14" onchange="updateBackground(this.value)">
+                            <span class="color-value" id="color1-value">#2b1f14</span>
+                        </div>
+                    </div>
+                    <div class="color-group">
+                        <label>Fill</label>
+                        <div class="color-picker-container">
+                            <input type="color" id="fillColor" value="#2b1f14" onchange="updateFillColor(this.value)">
+                            <span class="color-value" id="fillColor-value">#2b1f14</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -614,6 +643,7 @@
                 color: colors[i],
                 axisCount: axes[i],
                 branchDepth: depths[i],
+                layered: true,
                 size: 0.35,
                 orbitDistance: 1.1,
                 orbitSpeed: 0.15,
@@ -623,6 +653,19 @@
                 trailFade: 35,
                 lineWeight: 1.0,
                 depth3d: 0
+            };
+        }
+
+        function defaultLayer(axisCount, branchDepth, color) {
+            return {
+                axisCount: axisCount,
+                branchDepth: branchDepth,
+                color: color,
+                size: 1,
+                rotationSpeed: 0.35,
+                breathAmount: 0.07,
+                trailFade: 35,
+                lineWeight: 1.0
             };
         }
 
@@ -640,28 +683,28 @@
             linesPerShape: 18,
             layerCount: 3,
             // Layer 1 is the base; each added layer draws on top of the
-            // previous ones with its own color, axes and branch depth.
+            // previous ones with its own color, axes, branch depth, size,
+            // rotation, breathing, trail fade and line weight.
             layers: [
-                { axisCount: 6,  branchDepth: 1, color: '#f0e6d2' },
-                { axisCount: 8,  branchDepth: 1, color: '#d9a066' },
-                { axisCount: 4,  branchDepth: 1, color: '#c86641' },
-                { axisCount: 10, branchDepth: 0, color: '#6a9bcc' },
-                { axisCount: 12, branchDepth: 0, color: '#788c5d' }
+                defaultLayer(6,  1, '#f0e6d2'),
+                defaultLayer(8,  1, '#d9a066'),
+                defaultLayer(4,  1, '#c86641'),
+                defaultLayer(10, 0, '#6a9bcc'),
+                defaultLayer(12, 0, '#788c5d')
             ],
-            // The central structure's own motion / rendering character
+            // Structure-wide character: overall zoom and the 3D layer fan
             main: {
-                rotationSpeed: 0.35,
-                breathAmount: 0.07,
                 sizeScale: 0.55,
-                trailFade: 35,
-                lineWeight: 1.0,
                 depth3d: 0
             },
             satellitesEnabled: true,
             satelliteCount: 3,
             // Every satellite carries its own full set of controls
             satellites: [0, 1, 2, 3, 4, 5].map(defaultSatellite),
-            background: '#2b1f14'
+            background: '#2b1f14',
+            fillMode: false,
+            fillColor: '#2b1f14',
+            fillColorCustom: false
         };
 
         let defaultParams = deepCopyParams(params);
@@ -671,12 +714,18 @@
         // ═══════════════════════════════════════════════════════════════════════
 
         const MAIN_CONTROLS = [
-            { key: 'rotationSpeed', label: 'Rotation Speed', min: 0, max: 1.5, step: 0.05, share: 'mrt' },
-            { key: 'breathAmount',  label: 'Breathing', hint: 'slow radial pulse of the axes', min: 0, max: 0.25, step: 0.01, share: 'mbr' },
-            { key: 'sizeScale',     label: 'Size', hint: 'zoom freely — the design may overflow the canvas', min: 0.2, max: 3, step: 0.05, share: 'msz' },
-            { key: 'trailFade',     label: 'Trail Fade', hint: 'lower = longer trailing echoes', min: 4, max: 120, step: 1, int: true, share: 'mtf' },
-            { key: 'lineWeight',    label: 'Line Weight', min: 0.4, max: 3, step: 0.1, share: 'mlw' },
-            { key: 'depth3d',       label: '3D Effect', hint: 'tilts the structure and separates its layers in depth', min: 0, max: 1, step: 0.01, share: 'm3d' }
+            { key: 'sizeScale', label: 'Size', hint: 'overall zoom — the design may overflow the canvas', min: 0.2, max: 3, step: 0.05, share: 'msz' },
+            { key: 'depth3d',   label: '3D Effect', hint: 'tilts the structure and separates its layers in depth', min: 0, max: 1, step: 0.01, share: 'm3d' }
+        ];
+
+        const LAYER_CONTROLS = [
+            { key: 'axisCount',     label: 'Axes', min: 3, max: 16, step: 1, int: true, share: 'x' },
+            { key: 'branchDepth',   label: 'Branch Depth', min: 0, max: 3, step: 1, int: true, share: 'b' },
+            { key: 'size',          label: 'Size', min: 0.2, max: 2, step: 0.05, share: 'z' },
+            { key: 'rotationSpeed', label: 'Rotation Speed', min: 0, max: 1.5, step: 0.05, share: 'rt' },
+            { key: 'breathAmount',  label: 'Breathing', min: 0, max: 0.25, step: 0.01, share: 'br' },
+            { key: 'trailFade',     label: 'Trail Fade', min: 4, max: 120, step: 1, int: true, share: 'tf' },
+            { key: 'lineWeight',    label: 'Line Weight', min: 0.4, max: 3, step: 0.1, share: 'lw' }
         ];
 
         const SAT_CONTROLS = [
@@ -729,22 +778,44 @@
             if (bg && /^[0-9a-fA-F]{6}$/.test(bg)) {
                 params.background = '#' + bg.toLowerCase();
             }
+            if (qs.has('fill')) {
+                params.fillMode = qs.get('fill') !== '0';
+            }
+            let fc = qs.get('fc');
+            if (fc && /^[0-9a-fA-F]{6}$/.test(fc)) {
+                params.fillColor = '#' + fc.toLowerCase();
+                params.fillColorCustom = params.fillColor !== params.background;
+            }
             for (let def of MAIN_CONTROLS) {
                 if (!qs.has(def.share)) continue;
                 let v = clampDef(def, qs.get(def.share));
                 if (v !== null) params.main[def.key] = v;
             }
-            // Per-layer settings: l1x (axes), l1b (branch depth), l1c (color), ...
+            // Older links carried structure-wide motion settings; apply
+            // them to every layer so those links still reproduce.
+            const LEGACY_MAIN = { mrt: 'rotationSpeed', mbr: 'breathAmount', mtf: 'trailFade', mlw: 'lineWeight' };
+            for (let share in LEGACY_MAIN) {
+                if (!qs.has(share)) continue;
+                let def = LAYER_CONTROLS.find(d => d.key === LEGACY_MAIN[share]);
+                let v = clampDef(def, qs.get(share));
+                if (v !== null) {
+                    for (let lp of params.layers) lp[def.key] = v;
+                }
+            }
+            // Per-layer settings: l1x, l1b, l1z, l1rt, ... plus l1c (color)
             for (let i = 0; i < MAX_LAYERS; i++) {
                 let n = i + 1;
-                let ax = parseInt(qs.get('l' + n + 'x'));
-                if (isFinite(ax)) params.layers[i].axisCount = Math.min(16, Math.max(3, ax));
-                let bd = parseInt(qs.get('l' + n + 'b'));
-                if (isFinite(bd)) params.layers[i].branchDepth = Math.min(3, Math.max(0, bd));
+                for (let def of LAYER_CONTROLS) {
+                    let raw = qs.get('l' + n + def.share);
+                    if (raw === null) continue;
+                    let v = clampDef(def, raw);
+                    if (v !== null) params.layers[i][def.key] = v;
+                }
                 let c = qs.get('l' + n + 'c');
                 if (c && /^[0-9a-fA-F]{6}$/.test(c)) params.layers[i].color = '#' + c.toLowerCase();
             }
-            // Per-satellite settings: s1x, s1b, s1z, s1od, ... plus s1c (color)
+            // Per-satellite settings: s1x, s1b, s1z, s1od, ... plus s1c
+            // (color) and s1ly (layered toggle)
             for (let i = 0; i < MAX_SATS; i++) {
                 let n = i + 1;
                 for (let def of SAT_CONTROLS) {
@@ -755,6 +826,8 @@
                 }
                 let c = qs.get('s' + n + 'c');
                 if (c && /^[0-9a-fA-F]{6}$/.test(c)) params.satellites[i].color = '#' + c.toLowerCase();
+                let ly = qs.get('s' + n + 'ly');
+                if (ly !== null) params.satellites[i].layered = ly !== '0';
             }
         }
         applyParamsFromURL();
@@ -766,13 +839,16 @@
             }
             qs.set('sats', params.satellitesEnabled ? '1' : '0');
             qs.set('bg', params.background.slice(1));
+            qs.set('fill', params.fillMode ? '1' : '0');
+            qs.set('fc', params.fillColor.slice(1));
             for (let def of MAIN_CONTROLS) {
                 qs.set(def.share, params.main[def.key]);
             }
             for (let i = 0; i < MAX_LAYERS; i++) {
                 let n = i + 1;
-                qs.set('l' + n + 'x', params.layers[i].axisCount);
-                qs.set('l' + n + 'b', params.layers[i].branchDepth);
+                for (let def of LAYER_CONTROLS) {
+                    qs.set('l' + n + def.share, params.layers[i][def.key]);
+                }
                 qs.set('l' + n + 'c', params.layers[i].color.slice(1));
             }
             for (let i = 0; i < MAX_SATS; i++) {
@@ -781,6 +857,7 @@
                     qs.set('s' + n + def.share, params.satellites[i][def.key]);
                 }
                 qs.set('s' + n + 'c', params.satellites[i].color.slice(1));
+                qs.set('s' + n + 'ly', params.satellites[i].layered ? '1' : '0');
             }
             return location.origin + location.pathname + location.search + '#' + qs.toString();
         }
@@ -822,14 +899,14 @@
         //
         //   3. LAYERS. Whole stars stack atop one another: layer 1 is the
         //      base and every added layer draws on top of it, scaled down,
-        //      with its own color, axis count and branch depth. Layers spin
+        //      with its own color, axis count, branch depth, size, rotation
+        //      speed, breathing, trail fade and line weight. Layers spin
         //      against each other — odd layers counter-clockwise — and each
-        //      carries a seeded speed multiplier under the structure's single
-        //      rotation slider, so no two layers ever turn at exactly the
-        //      same rate. Static offsets seeded by the golden angle keep the
-        //      stack interleaved rather than aligned. Moiré interference
-        //      between counter-rotating envelopes is where the complexity
-        //      lives.
+        //      carries a seeded speed multiplier under its own rotation
+        //      slider, so no two layers ever turn at exactly the same rate.
+        //      Static offsets seeded by the golden angle keep the stack
+        //      interleaved rather than aligned. Moiré interference between
+        //      counter-rotating envelopes is where the complexity lives.
         //
         //   4. BREATH. Spoke lengths pulse gently, phased by branch
         //      generation (never by individual spoke), so the form inhales
@@ -842,12 +919,15 @@
         //      the character the sliders don't set: layer count, thread
         //      density, spin bias, branch length and orbit-warp harmonics.
         //
-        //   6. TRAILS & DEPTH. Every structure renders into its own
-        //      offscreen buffer so trail fade is truly per-structure; the
-        //      buffers fade to transparent and composite over the solid
-        //      background each frame. The 3D slider tilts a structure out
-        //      of plane and fans its layers apart in z, with perspective
-        //      scaling plus depth-cued brightness and line weight.
+        //   6. TRAILS & DEPTH. Every satellite — and every layer of the
+        //      central structure — renders into its own offscreen buffer so
+        //      trail fade is truly per-structure and per-layer; the buffers
+        //      fade to transparent and composite over the solid background
+        //      each frame. The 3D slider tilts a structure out of plane and
+        //      fans its layers apart in z, with perspective scaling plus
+        //      depth-cued brightness and line weight. A global fill toggle
+        //      paints each star's silhouette in a chosen fill color so the
+        //      space between the threads reads solid instead of see-through.
         // ═══════════════════════════════════════════════════════════════════════
 
         let t = 0;
@@ -857,7 +937,7 @@
         let satPhase = 0;
         let satConfigs = [];
         let seedTraits = { weaveExp: 1, layerScale: 0.78, skip: 1 };
-        let mainBuffer = null;
+        let layerBuffers = new Array(MAX_LAYERS).fill(null);
         let satBuffers = new Array(MAX_SATS).fill(null);
         let frameState = { useGlow: true };
         const PHI = 1.6180339887498948;
@@ -881,15 +961,22 @@
         function windowResized() {
             let [w, h] = containerSize();
             resizeCanvas(w, h);
-            mainBuffer = null; // recreated at the new size next frame
+            // layer buffers are recreated at the new size next frame
+            for (let L = 0; L < MAX_LAYERS; L++) {
+                if (layerBuffers[L]) {
+                    layerBuffers[L].remove();
+                    layerBuffers[L] = null;
+                }
+            }
             background(params.background);
         }
 
         // ═══════════════════════════════════════════════════════════════════════
-        // PER-STRUCTURE TRAIL BUFFERS - each structure draws into its own
-        // offscreen graphics so trail fade can differ per structure. Buffers
-        // fade toward transparent (destination-out), then composite over the
-        // solid background every frame.
+        // TRAIL BUFFERS - each satellite, and each layer of the central
+        // structure, draws into its own offscreen graphics so trail fade
+        // can differ per structure and per layer. Buffers fade toward
+        // transparent (destination-out), then composite over the solid
+        // background every frame.
         // ═══════════════════════════════════════════════════════════════════════
 
         function makeBuffer(w, h) {
@@ -898,11 +985,13 @@
             return g;
         }
 
-        function ensureMainBuffer() {
-            if (!mainBuffer || mainBuffer.width !== width || mainBuffer.height !== height) {
-                mainBuffer = makeBuffer(width, height);
+        function ensureLayerBuffer(L) {
+            let b = layerBuffers[L];
+            if (!b || b.width !== width || b.height !== height) {
+                if (b) b.remove();
+                layerBuffers[L] = makeBuffer(width, height);
             }
-            return mainBuffer;
+            return layerBuffers[L];
         }
 
         function ensureSatBuffer(k, sizePx) {
@@ -980,7 +1069,9 @@
             }
 
             t = 0;
-            if (mainBuffer) mainBuffer.clear();
+            for (let b of layerBuffers) {
+                if (b) b.clear();
+            }
             for (let b of satBuffers) {
                 if (b) b.clear();
             }
@@ -1020,20 +1111,22 @@
         //   g         target p5.Graphics
         //   ox, oy    origin within the buffer
         //   R         outer radius of this structure
-        //   cfg       { layers: [{ spokes, col, speedFactor }], d, spinBias,
-        //               flip, rotationSpeed, breathAmount, lineWeight,
-        //               depth3d } — layers ordered bottom to top, so each
-        //               added layer paints over the ones before it
+        //   cfg       { layers: [{ spokes, col, speedFactor }], totalLayers,
+        //               d, spinBias, flip, rotationSpeed, breathAmount,
+        //               lineWeight, depth3d, fillCol } — layers ordered
+        //               bottom to top, so each added layer paints over the
+        //               ones before it. A layer may carry its own overrides
+        //               { index, sizeMult, rotationSpeed, breathAmount,
+        //               lineWeight } which fall back to the structure-level
+        //               values; index/totalLayers let a single layer render
+        //               into its own buffer while keeping its place in the
+        //               stack. fillCol, when set, fills each star's
+        //               silhouette so the space between the threads reads
+        //               as a solid shape instead of staying transparent.
         function drawStructure(g, ox, oy, R, cfg) {
             const { useGlow } = frameState;
             const d = cfg.d;
-            const n = cfg.layers.length;
-
-            // Per-structure breathing factors (generation-level = symmetric)
-            let breath = [];
-            for (let gen = 0; gen < MAX_GENS; gen++) {
-                breath.push(1 + cfg.breathAmount * Math.sin(t * 0.8 * Math.pow(PHI, gen % 2 ? 1 : 0) + breathPhases[gen] + gen * 1.7));
-            }
+            const nTotal = cfg.totalLayers || cfg.layers.length;
 
             // 3D: tilt the structure's plane (with a slow wobble) and fan
             // the layers apart along z; perspective-project every point.
@@ -1044,13 +1137,25 @@
             const F = Math.max(R * 4, 1);
             const zSpacing = R * 0.3 * cfg.depth3d;
 
-            for (let L = 0; L < n; L++) {
-                const { spokes, col: layerCol, speedFactor } = cfg.layers[L];
-                let dir = ((L % 2 === 0) ? 1 : -1) * cfg.flip;
-                let speed = cfg.rotationSpeed * 0.3 * speedFactor;
-                let rot = layerOffsets[L] + cfg.spinBias + t * speed * dir;
-                let scale = Math.pow(seedTraits.layerScale, L) * R;
-                let zL = (L - (n - 1) / 2) * zSpacing;
+            for (let L = 0; L < cfg.layers.length; L++) {
+                const layer = cfg.layers[L];
+                const { spokes, col: layerCol, speedFactor } = layer;
+                const idx = layer.index !== undefined ? layer.index : L;
+                const rotationSpeed = layer.rotationSpeed !== undefined ? layer.rotationSpeed : cfg.rotationSpeed;
+                const breathAmount = layer.breathAmount !== undefined ? layer.breathAmount : cfg.breathAmount;
+                const lineWeight = layer.lineWeight !== undefined ? layer.lineWeight : cfg.lineWeight;
+
+                // Per-layer breathing factors (generation-level = symmetric)
+                let breath = [];
+                for (let gen = 0; gen < MAX_GENS; gen++) {
+                    breath.push(1 + breathAmount * Math.sin(t * 0.8 * Math.pow(PHI, gen % 2 ? 1 : 0) + breathPhases[gen] + gen * 1.7));
+                }
+
+                let dir = ((idx % 2 === 0) ? 1 : -1) * cfg.flip;
+                let speed = rotationSpeed * 0.3 * speedFactor;
+                let rot = layerOffsets[idx] + cfg.spinBias + t * speed * dir;
+                let scale = Math.pow(seedTraits.layerScale, idx) * R * (layer.sizeMult !== undefined ? layer.sizeMult : 1);
+                let zL = (idx - (nTotal - 1) / 2) * zSpacing;
 
                 // Perspective projection of an in-plane point at this
                 // layer's z. Returns screen x, y and the depth scale.
@@ -1073,9 +1178,23 @@
                 let [pcx, pcy] = proj(0, 0);
                 let r0 = red(layerCol), g0 = green(layerCol), b0 = blue(layerCol);
 
+                // 0. Fill mode: paint the star's silhouette solid so the
+                // space between the threads is filled, not transparent
+                if (cfg.fillCol) {
+                    g.noStroke();
+                    g.fill(cfg.fillCol);
+                    g.beginShape();
+                    for (let tip of tips) {
+                        let [tx, ty] = proj(tip.x, tip.y);
+                        g.vertex(tx, ty);
+                    }
+                    g.endShape(CLOSE);
+                    g.noFill();
+                }
+
                 // 1. The frame: the spokes themselves, faint
                 g.stroke(r0, g0, b0, 70);
-                g.strokeWeight(cfg.lineWeight * 0.8);
+                g.strokeWeight(lineWeight * 0.8);
                 for (let tip of tips) {
                     let [tx, ty] = proj(tip.x, tip.y);
                     g.line(pcx, pcy, tx, ty);
@@ -1102,12 +1221,12 @@
 
                         if (useGlow) {
                             g.stroke(r0, g0, b0, 18);
-                            g.strokeWeight(cfg.lineWeight * 3);
+                            g.strokeWeight(lineWeight * 3);
                             g.line(x1, y1, x2, y2);
                         }
 
                         g.stroke(r0, g0, b0, a);
-                        g.strokeWeight(cfg.lineWeight * depthCue);
+                        g.strokeWeight(lineWeight * depthCue);
                         g.line(x1, y1, x2, y2);
                     }
                 }
@@ -1117,38 +1236,47 @@
         function draw() {
             background(params.background);
             t += 0.01;
-            ensureMainBuffer();
 
             let minDim = Math.min(width, height);
             let d = Math.round(params.linesPerShape);
             let S = params.satellitesEnabled ? params.satelliteCount : 0;
+            let fillCol = params.fillMode ? color(params.fillColor) : null;
 
             // The central structure: every active layer follows its own
-            // controls (color, axes, branch depth) plus a seeded speed rate.
+            // full set of controls (color, axes, branches, size, rotation,
+            // breathing, trails, line weight) plus a seeded speed rate, and
+            // renders into its own trail buffer so trail fade is per-layer.
             let m = params.main;
-            let mainLayers = [];
+            let mainLayerCfgs = [];
             for (let L = 0; L < params.layerCount; L++) {
                 let lp = params.layers[L];
-                mainLayers.push({
-                    spokes: buildSpokes(lp.axisCount, lp.branchDepth, BRANCH_SCALE),
-                    col: color(lp.color),
-                    speedFactor: (1 + L * 0.22) * layerSpeedJitter[L]
+                mainLayerCfgs.push({
+                    layers: [{
+                        spokes: buildSpokes(lp.axisCount, lp.branchDepth, BRANCH_SCALE),
+                        col: color(lp.color),
+                        speedFactor: (1 + L * 0.22) * layerSpeedJitter[L],
+                        index: L,
+                        sizeMult: lp.size,
+                        rotationSpeed: lp.rotationSpeed,
+                        breathAmount: lp.breathAmount,
+                        lineWeight: lp.lineWeight
+                    }],
+                    totalLayers: params.layerCount,
+                    d: d,
+                    spinBias: 0,
+                    flip: 1,
+                    rotationSpeed: lp.rotationSpeed,
+                    breathAmount: lp.breathAmount,
+                    lineWeight: lp.lineWeight,
+                    depth3d: m.depth3d,
+                    fillCol: fillCol
                 });
             }
-            let mainCfg = {
-                layers: mainLayers,
-                d: d,
-                spinBias: 0,
-                flip: 1,
-                rotationSpeed: m.rotationSpeed,
-                breathAmount: m.breathAmount,
-                lineWeight: m.lineWeight,
-                depth3d: m.depth3d
-            };
 
             // Each satellite: its slider settings plus seeded character.
             // Satellite layers share one spoke set and shade from the
-            // satellite's color toward a lighter tint of it.
+            // satellite's color toward a lighter tint of it. The layered
+            // toggle collapses a satellite to a single un-stacked star.
             let satCfgs = [];
             for (let k = 0; k < S; k++) {
                 let sp = params.satellites[k];
@@ -1156,9 +1284,10 @@
                 let spokes = buildSpokes(sp.axisCount, sp.branchDepth, c.branchScale);
                 let col = color(sp.color);
                 let colTop = lerpColor(col, color(255), 0.45);
+                let layerN = sp.layered === false ? 1 : c.layerCount;
                 let layers = [];
-                for (let L = 0; L < c.layerCount; L++) {
-                    let blend = c.layerCount > 1 ? L / (c.layerCount - 1) : 0;
+                for (let L = 0; L < layerN; L++) {
+                    let blend = layerN > 1 ? L / (layerN - 1) : 0;
                     layers.push({
                         spokes: spokes,
                         col: lerpColor(col, colTop, blend),
@@ -1173,14 +1302,15 @@
                     rotationSpeed: sp.rotationSpeed,
                     breathAmount: sp.breathAmount,
                     lineWeight: sp.lineWeight,
-                    depth3d: sp.depth3d
+                    depth3d: sp.depth3d,
+                    fillCol: fillCol
                 });
             }
 
             // Skip the soft glow pass when the frame would be too dense
             let totalLines = 0;
-            for (let layer of mainCfg.layers) {
-                totalLines += layer.spokes.length * mainCfg.d;
+            for (let mc of mainLayerCfgs) {
+                totalLines += mc.layers[0].spokes.length * mc.d;
             }
             for (let c of satCfgs) {
                 for (let layer of c.layers) {
@@ -1212,11 +1342,15 @@
                 image(buf, sx - buf.width / 2, sy - buf.height / 2);
             }
 
-            // The central structure
-            fadeBuffer(mainBuffer, m.trailFade);
+            // The central structure: layer 1 at the bottom, each layer in
+            // its own trail buffer so its fade can differ from the rest
             let mainR = minDim * 0.5 * m.sizeScale;
-            drawStructure(mainBuffer, width / 2, height / 2, mainR, mainCfg);
-            image(mainBuffer, 0, 0);
+            for (let L = 0; L < params.layerCount; L++) {
+                let buf = ensureLayerBuffer(L);
+                fadeBuffer(buf, params.layers[L].trailFade);
+                drawStructure(buf, width / 2, height / 2, mainR, mainLayerCfgs[L]);
+                image(buf, 0, 0);
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -1235,15 +1369,38 @@
             document.getElementById(paramName + '-value').textContent = value;
             if (paramName === 'layerCount') {
                 renderLayerControls();
+                // release trail buffers for layers no longer drawn
+                for (let L = params.layerCount; L < MAX_LAYERS; L++) {
+                    if (layerBuffers[L]) {
+                        layerBuffers[L].remove();
+                        layerBuffers[L] = null;
+                    }
+                }
             }
             if (paramName === 'satelliteCount') {
                 renderSatelliteControls();
             }
         }
 
-        function updateColor(colorId, value) {
+        function updateBackground(value) {
             params.background = value;
             document.getElementById('color1-value').textContent = value;
+            // the fill color follows the background until it's customized
+            if (!params.fillColorCustom) {
+                params.fillColor = value;
+                document.getElementById('fillColor').value = value;
+                document.getElementById('fillColor-value').textContent = value;
+            }
+        }
+
+        function updateFillColor(value) {
+            params.fillColor = value;
+            params.fillColorCustom = true;
+            document.getElementById('fillColor-value').textContent = value;
+        }
+
+        function toggleFillMode(enabled) {
+            params.fillMode = enabled;
         }
 
         function toggleSatellites(enabled) {
@@ -1269,6 +1426,10 @@
             let html = '';
             for (let i = 0; i < params.layerCount; i++) {
                 let lp = params.layers[i];
+                let controls = '';
+                for (let def of LAYER_CONTROLS) {
+                    controls += sliderHTML(def, lp[def.key], 'updateLayerParam(' + i + ", '" + def.key + "', this.value)", 'layer' + i);
+                }
                 html += `
                 <div class="layer-card">
                     <div class="layer-card-title">
@@ -1278,28 +1439,16 @@
                             <input type="color" value="${lp.color}" onchange="updateLayerColor(${i}, this.value)">
                         </div>
                     </div>
-                    <div class="control-group">
-                        <label>Axes</label>
-                        <div class="slider-container">
-                            <input type="range" min="3" max="16" step="1" value="${lp.axisCount}" oninput="updateLayerParam(${i}, 'axisCount', this.value)">
-                            <span class="value-display" id="layer${i}-axisCount-value">${lp.axisCount}</span>
-                        </div>
-                    </div>
-                    <div class="control-group">
-                        <label>Branch Depth</label>
-                        <div class="slider-container">
-                            <input type="range" min="0" max="3" step="1" value="${lp.branchDepth}" oninput="updateLayerParam(${i}, 'branchDepth', this.value)">
-                            <span class="value-display" id="layer${i}-branchDepth-value">${lp.branchDepth}</span>
-                        </div>
-                    </div>
+                    ${controls}
                 </div>`;
             }
             container.innerHTML = html;
         }
 
-        function updateLayerParam(layerIndex, name, value) {
-            params.layers[layerIndex][name] = parseInt(value);
-            document.getElementById('layer' + layerIndex + '-' + name + '-value').textContent = value;
+        function updateLayerParam(layerIndex, key, value) {
+            let def = LAYER_CONTROLS.find(d => d.key === key);
+            params.layers[layerIndex][key] = def.int ? parseInt(value) : parseFloat(value);
+            document.getElementById('layer' + layerIndex + '-' + key + '-value').textContent = value;
         }
 
         function updateLayerColor(layerIndex, value) {
@@ -1339,6 +1488,16 @@
                             <input type="color" value="${sp.color}" onchange="updateSatColor(${i}, this.value)">
                         </div>
                     </div>
+                    <div class="control-group">
+                        <div class="toggle-row">
+                            <label>Layers</label>
+                            <label class="switch">
+                                <input type="checkbox" ${sp.layered ? 'checked' : ''} onchange="updateSatLayered(${i}, this.checked)">
+                                <span class="switch-track"></span>
+                            </label>
+                        </div>
+                        <span class="hint">off = a single un-stacked star</span>
+                    </div>
                     ${controls}
                     <button class="button secondary sync-button" onclick="syncSatellites(${i})">⇉ Sync all satellites to this</button>
                 </div>`;
@@ -1357,9 +1516,19 @@
             document.getElementById('sat' + i + '-color-value').textContent = value;
         }
 
+        function updateSatLayered(i, enabled) {
+            params.satellites[i].layered = enabled;
+        }
+
         function syncSatellites(i) {
+            // Copy every slider, the color and the layered toggle — and also
+            // the seeded character (layer count, thread density, spin,
+            // branch length, orbit warp) that previously kept synced
+            // satellites looking different despite identical settings.
             let src = params.satellites[i];
             params.satellites = params.satellites.map(() => ({ ...src }));
+            let srcCfg = satConfigs[i];
+            satConfigs = satConfigs.map(() => ({ ...srcCfg }));
             renderSatelliteControls();
         }
 
@@ -1408,6 +1577,9 @@
 
             document.getElementById('color1').value = params.background;
             document.getElementById('color1-value').textContent = params.background;
+            document.getElementById('fillMode').checked = params.fillMode;
+            document.getElementById('fillColor').value = params.fillColor;
+            document.getElementById('fillColor-value').textContent = params.fillColor;
             document.getElementById('satellitesEnabled').checked = params.satellitesEnabled;
 
             renderLayerControls();
