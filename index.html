@@ -311,6 +311,54 @@
             height: 26px;
         }
 
+        .card-title-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .collapse-button {
+            background: none;
+            border: none;
+            color: var(--anthropic-mid-gray);
+            font-size: 12px;
+            line-height: 1;
+            padding: 0;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .collapse-button:hover {
+            color: var(--anthropic-orange);
+        }
+
+        .layer-card.collapsed .card-body {
+            display: none;
+        }
+
+        .layer-card.collapsed .layer-card-title {
+            margin-bottom: 0;
+        }
+
+        .mini-sync {
+            background: none;
+            border: 1px solid var(--anthropic-light-gray);
+            border-radius: 4px;
+            color: var(--anthropic-mid-gray);
+            font-size: 11px;
+            line-height: 1;
+            padding: 3px 5px;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all 0.2s ease;
+        }
+
+        .mini-sync:hover {
+            border-color: var(--anthropic-orange);
+            color: var(--anthropic-orange);
+        }
+
         .layer-card .control-group {
             margin-bottom: 10px;
         }
@@ -926,8 +974,9 @@
         //      each frame. The 3D slider tilts a structure out of plane and
         //      fans its layers apart in z, with perspective scaling plus
         //      depth-cued brightness and line weight. A global fill toggle
-        //      paints each star's silhouette in a chosen fill color so the
-        //      space between the threads reads solid instead of see-through.
+        //      paints the region the threads cover — bounded by their
+        //      envelope curves — in a chosen fill color so the space
+        //      between the threads reads solid instead of see-through.
         // ═══════════════════════════════════════════════════════════════════════
 
         let t = 0;
@@ -1120,13 +1169,34 @@
         //               lineWeight } which fall back to the structure-level
         //               values; index/totalLayers let a single layer render
         //               into its own buffer while keeping its place in the
-        //               stack. fillCol, when set, fills each star's
-        //               silhouette so the space between the threads reads
-        //               as a solid shape instead of staying transparent.
+        //               stack. fillCol, when set, fills the region the
+        //               threads cover — out to their envelope curves — so
+        //               the space between the threads reads as a solid
+        //               shape instead of staying transparent.
+        // Intersection of the infinite lines through (a1,a2) and (b1,b2);
+        // null when they are (nearly) parallel
+        function lineIntersection(a1, a2, b1, b2) {
+            let den = (a2[0] - a1[0]) * (b2[1] - b1[1]) - (a2[1] - a1[1]) * (b2[0] - b1[0]);
+            if (Math.abs(den) < 1e-9) return null;
+            let u = ((b1[0] - a1[0]) * (b2[1] - b1[1]) - (b1[1] - a1[1]) * (b2[0] - b1[0])) / den;
+            return [a1[0] + u * (a2[0] - a1[0]), a1[1] + u * (a2[1] - a1[1])];
+        }
+
         function drawStructure(g, ox, oy, R, cfg) {
             const { useGlow } = frameState;
             const d = cfg.d;
             const nTotal = cfg.totalLayers || cfg.layers.length;
+
+            // Anchor fractions along each pair of spokes; chord j runs from
+            // fraction fr[j][0] of spoke A to fraction fr[j][1] of spoke B.
+            // Shared by the stitched chords and the fill silhouette.
+            let fr = [];
+            for (let j = 0; j < d; j++) {
+                fr.push([
+                    Math.pow((d - j) / d, seedTraits.weaveExp),
+                    Math.pow((j + 1) / d, seedTraits.weaveExp)
+                ]);
+            }
 
             // 3D: tilt the structure's plane (with a slow wobble) and fan
             // the layers apart along z; perspective-project every point.
@@ -1178,17 +1248,34 @@
                 let [pcx, pcy] = proj(0, 0);
                 let r0 = red(layerCol), g0 = green(layerCol), b0 = blue(layerCol);
 
-                // 0. Fill mode: paint the star's silhouette solid so the
-                // space between the threads is filled, not transparent
+                // 0. Fill mode: paint only the region the threads actually
+                // cover. In each wedge the chords' outer boundary is their
+                // envelope curve, traced by the intersections of consecutive
+                // chords, so the fill hugs the curved edge of the stitching
+                // instead of spilling past it toward the straight tip-to-tip
+                // line.
                 if (cfg.fillCol) {
                     g.noStroke();
                     g.fill(cfg.fillCol);
-                    g.beginShape();
-                    for (let tip of tips) {
-                        let [tx, ty] = proj(tip.x, tip.y);
-                        g.vertex(tx, ty);
+                    for (let i = 0; i < tips.length; i++) {
+                        let A = tips[i];
+                        let B = tips[(i + seedTraits.skip) % tips.length];
+                        g.beginShape();
+                        g.vertex(pcx, pcy);
+                        let prev = null;
+                        for (let j = 0; j < d; j++) {
+                            let p1 = proj(A.x * fr[j][0], A.y * fr[j][0]);
+                            let p2 = proj(B.x * fr[j][1], B.y * fr[j][1]);
+                            if (j === 0) g.vertex(p1[0], p1[1]);
+                            if (prev) {
+                                let X = lineIntersection(prev[0], prev[1], p1, p2);
+                                if (X) g.vertex(X[0], X[1]);
+                            }
+                            if (j === d - 1) g.vertex(p2[0], p2[1]);
+                            prev = [p1, p2];
+                        }
+                        g.endShape(CLOSE);
                     }
-                    g.endShape(CLOSE);
                     g.noFill();
                 }
 
@@ -1207,8 +1294,8 @@
                     for (let j = 0; j < d; j++) {
                         // weaveExp warps how fast the anchors slide along
                         // their spokes, bending the envelope's curvature
-                        let fA = Math.pow((d - j) / d, seedTraits.weaveExp);   // slides down spoke A
-                        let fB = Math.pow((j + 1) / d, seedTraits.weaveExp);   // slides up spoke B
+                        let fA = fr[j][0];   // slides down spoke A
+                        let fB = fr[j][1];   // slides up spoke B
                         let [x1, y1, s1] = proj(A.x * fA, A.y * fA);
                         let [x2, y2, s2] = proj(B.x * fB, B.y * fB);
                         let sAvg = (s1 + s2) / 2;
@@ -1405,20 +1492,39 @@
 
         function toggleSatellites(enabled) {
             params.satellitesEnabled = enabled;
+            // fold the satellite cards away while satellites are off
+            satCollapsed = new Array(MAX_SATS).fill(!enabled);
+            renderSatelliteControls();
         }
 
         // ═══════════════════════════════════════════════════════════════════════
         // DYNAMIC CONTROL RENDERING - layer cards, main block, satellite cards
         // ═══════════════════════════════════════════════════════════════════════
 
-        function sliderHTML(def, value, handler, idPrefix) {
+        function sliderHTML(def, value, handler, idPrefix, extra) {
             return '<div class="control-group">' +
                 '<label>' + def.label + '</label>' +
                 (def.hint ? '<span class="hint">' + def.hint + '</span>' : '') +
                 '<div class="slider-container">' +
                 '<input type="range" min="' + def.min + '" max="' + def.max + '" step="' + def.step + '" value="' + value + '" oninput="' + handler + '">' +
                 '<span class="value-display" id="' + idPrefix + '-' + def.key + '-value">' + value + '</span>' +
+                (extra || '') +
                 '</div></div>';
+        }
+
+        // Collapse state of the per-layer and per-satellite cards (pure UI
+        // state, so it isn't part of params or share links)
+        let layerCollapsed = new Array(MAX_LAYERS).fill(false);
+        let satCollapsed = new Array(MAX_SATS).fill(false);
+
+        function toggleLayerCollapsed(i) {
+            layerCollapsed[i] = !layerCollapsed[i];
+            renderLayerControls();
+        }
+
+        function toggleSatCollapsed(i) {
+            satCollapsed[i] = !satCollapsed[i];
+            renderSatelliteControls();
         }
 
         function renderLayerControls() {
@@ -1428,18 +1534,24 @@
                 let lp = params.layers[i];
                 let controls = '';
                 for (let def of LAYER_CONTROLS) {
-                    controls += sliderHTML(def, lp[def.key], 'updateLayerParam(' + i + ", '" + def.key + "', this.value)", 'layer' + i);
+                    let sync = '<button class="mini-sync" title="Sync all layers to this setting" onclick="syncLayerSetting(' + i + ", '" + def.key + "')\">⇉</button>";
+                    controls += sliderHTML(def, lp[def.key], 'updateLayerParam(' + i + ", '" + def.key + "', this.value)", 'layer' + i, sync);
                 }
                 html += `
-                <div class="layer-card">
+                <div class="layer-card${layerCollapsed[i] ? ' collapsed' : ''}">
                     <div class="layer-card-title">
-                        <span>Layer ${i + 1}${i === 0 ? ' (base)' : ''}</span>
+                        <div class="card-title-left">
+                            <button class="collapse-button" onclick="toggleLayerCollapsed(${i})" title="${layerCollapsed[i] ? 'Expand' : 'Collapse'}">${layerCollapsed[i] ? '▸' : '▾'}</button>
+                            <span>Layer ${i + 1}${i === 0 ? ' (base)' : ''}</span>
+                        </div>
                         <div class="color-picker-container">
                             <span class="color-value" id="layer${i}-color-value">${lp.color}</span>
                             <input type="color" value="${lp.color}" onchange="updateLayerColor(${i}, this.value)">
                         </div>
                     </div>
-                    ${controls}
+                    <div class="card-body">
+                        ${controls}
+                    </div>
                 </div>`;
             }
             container.innerHTML = html;
@@ -1449,6 +1561,15 @@
             let def = LAYER_CONTROLS.find(d => d.key === key);
             params.layers[layerIndex][key] = def.int ? parseInt(value) : parseFloat(value);
             document.getElementById('layer' + layerIndex + '-' + key + '-value').textContent = value;
+        }
+
+        // Copy one slider's value from a layer to every other layer
+        function syncLayerSetting(layerIndex, key) {
+            let v = params.layers[layerIndex][key];
+            for (let lp of params.layers) {
+                lp[key] = v;
+            }
+            renderLayerControls();
         }
 
         function updateLayerColor(layerIndex, value) {
@@ -1480,26 +1601,31 @@
                     controls += sliderHTML(def, sp[def.key], 'updateSatParam(' + i + ", '" + def.key + "', this.value)", 'sat' + i);
                 }
                 html += `
-                <div class="layer-card">
+                <div class="layer-card${satCollapsed[i] ? ' collapsed' : ''}">
                     <div class="layer-card-title">
-                        <span>Satellite ${i + 1}</span>
+                        <div class="card-title-left">
+                            <button class="collapse-button" onclick="toggleSatCollapsed(${i})" title="${satCollapsed[i] ? 'Expand' : 'Collapse'}">${satCollapsed[i] ? '▸' : '▾'}</button>
+                            <span>Satellite ${i + 1}</span>
+                        </div>
                         <div class="color-picker-container">
                             <span class="color-value" id="sat${i}-color-value">${sp.color}</span>
                             <input type="color" value="${sp.color}" onchange="updateSatColor(${i}, this.value)">
                         </div>
                     </div>
-                    <div class="control-group">
-                        <div class="toggle-row">
-                            <label>Layers</label>
-                            <label class="switch">
-                                <input type="checkbox" ${sp.layered ? 'checked' : ''} onchange="updateSatLayered(${i}, this.checked)">
-                                <span class="switch-track"></span>
-                            </label>
+                    <div class="card-body">
+                        <div class="control-group">
+                            <div class="toggle-row">
+                                <label>Layers</label>
+                                <label class="switch">
+                                    <input type="checkbox" ${sp.layered ? 'checked' : ''} onchange="updateSatLayered(${i}, this.checked)">
+                                    <span class="switch-track"></span>
+                                </label>
+                            </div>
+                            <span class="hint">off = a single un-stacked star</span>
                         </div>
-                        <span class="hint">off = a single un-stacked star</span>
+                        ${controls}
+                        <button class="button secondary sync-button" onclick="syncSatellites(${i})">⇉ Sync all satellites to this</button>
                     </div>
-                    ${controls}
-                    <button class="button secondary sync-button" onclick="syncSatellites(${i})">⇉ Sync all satellites to this</button>
                 </div>`;
             }
             container.innerHTML = html;
@@ -1581,6 +1707,7 @@
             document.getElementById('fillColor').value = params.fillColor;
             document.getElementById('fillColor-value').textContent = params.fillColor;
             document.getElementById('satellitesEnabled').checked = params.satellitesEnabled;
+            satCollapsed = new Array(MAX_SATS).fill(!params.satellitesEnabled);
 
             renderLayerControls();
             renderMainControls();
