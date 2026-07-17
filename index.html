@@ -595,6 +595,13 @@
             <div class="control-section">
                 <h3>Main Structure</h3>
                 <div id="main-controls"></div>
+                <div class="color-group">
+                    <label>Shader Color</label>
+                    <div class="color-picker-container">
+                        <input type="color" id="shaderColor" value="#d94040" onchange="updateShaderColor(this.value)">
+                        <span class="color-value" id="shaderColor-value">#d94040</span>
+                    </div>
+                </div>
             </div>
 
             <div class="control-section">
@@ -603,7 +610,7 @@
                 <div class="control-group toggle-row">
                     <label for="satellitesEnabled">Satellites</label>
                     <label class="switch">
-                        <input type="checkbox" id="satellitesEnabled" checked onchange="toggleSatellites(this.checked)">
+                        <input type="checkbox" id="satellitesEnabled" onchange="toggleSatellites(this.checked)">
                         <span class="switch-track"></span>
                     </label>
                 </div>
@@ -612,8 +619,8 @@
                     <label>Satellite Count</label>
                     <span class="hint">each satellite gets its own control card below</span>
                     <div class="slider-container">
-                        <input type="range" id="satelliteCount" min="0" max="6" step="1" value="3" oninput="updateParam('satelliteCount', this.value)">
-                        <span class="value-display" id="satelliteCount-value">3</span>
+                        <input type="range" id="satelliteCount" min="0" max="6" step="1" value="0" oninput="updateParam('satelliteCount', this.value)">
+                        <span class="value-display" id="satelliteCount-value">0</span>
                     </div>
                 </div>
 
@@ -660,6 +667,7 @@
                     <button class="button" onclick="resetParameters()">Reset</button>
                 </div>
                 <button class="button secondary share-button" id="share-button" onclick="copyShareLink()">🔗 Copy Share Link</button>
+                <button class="button tertiary share-button" onclick="captureScreenshot()">📷 Capture Screenshot</button>
             </div>
         </div>
 
@@ -697,8 +705,8 @@
                 orbitSpeed: 0.15,
                 orbitShape: 0,
                 rotationSpeed: 0.35,
-                breathAmount: 0.07,
-                trailFade: 35,
+                breathAmount: 0,
+                trailFade: 120,
                 lineWeight: 1.0,
                 depth3d: 0
             };
@@ -711,8 +719,8 @@
                 color: color,
                 size: 1,
                 rotationSpeed: 0.35,
-                breathAmount: 0.07,
-                trailFade: 35,
+                breathAmount: 0,
+                trailFade: 120,
                 lineWeight: 1.0
             };
         }
@@ -740,13 +748,20 @@
                 defaultLayer(10, 0, '#6a9bcc'),
                 defaultLayer(12, 0, '#788c5d')
             ],
-            // Structure-wide character: overall zoom and the 3D layer fan
+            // Structure-wide character: overall zoom, the 3D layer fan,
+            // the faked-depth line treatments and the core shader
             main: {
                 sizeScale: 0.55,
-                depth3d: 0
+                depth3d: 0,
+                depthFade: 0,
+                axisGlow: 0,
+                shaderAmount: 0,
+                shaderRadius: 0.35,
+                shaderSoftness: 0.6,
+                shaderColor: '#d94040'
             },
-            satellitesEnabled: true,
-            satelliteCount: 3,
+            satellitesEnabled: false,
+            satelliteCount: 0,
             // Every satellite carries its own full set of controls
             satellites: [0, 1, 2, 3, 4, 5].map(defaultSatellite),
             background: '#2b1f14',
@@ -763,7 +778,12 @@
 
         const MAIN_CONTROLS = [
             { key: 'sizeScale', label: 'Size', hint: 'overall zoom — the design may overflow the canvas', min: 0.2, max: 3, step: 0.05, share: 'msz' },
-            { key: 'depth3d',   label: '3D Effect', hint: 'tilts the structure and separates its layers in depth', min: 0, max: 1, step: 0.01, share: 'm3d' }
+            { key: 'depth3d',   label: '3D Effect', hint: 'tilts the structure and separates its layers in depth', min: 0, max: 1, step: 0.01, share: 'm3d' },
+            { key: 'depthFade', label: 'Depth Fade', hint: 'circular fade to transparency closing in from the outer edges — shrinks the visible orb down to nothing at max', min: 0, max: 1, step: 0.01, share: 'mdf' },
+            { key: 'axisGlow',  label: 'Axis Highlight', hint: 'brightens every axis (branches included) so the corners read as 3D edges', min: 0, max: 1, step: 0.01, share: 'mag' },
+            { key: 'shaderAmount',   label: 'Core Shader', hint: 'tints threads near the origin with the shader color, carving an inner shape', min: 0, max: 1, step: 0.01, share: 'msa' },
+            { key: 'shaderRadius',   label: 'Shader Radius', hint: 'the tint grows from the origin out to this radius', min: 0.05, max: 1.5, step: 0.01, share: 'msr' },
+            { key: 'shaderSoftness', label: 'Shader Softness', hint: '0 = hard edge, 1 = long gradient', min: 0, max: 1, step: 0.01, share: 'mss' }
         ];
 
         const LAYER_CONTROLS = [
@@ -839,6 +859,10 @@
                 let v = clampDef(def, qs.get(def.share));
                 if (v !== null) params.main[def.key] = v;
             }
+            let msc = qs.get('msc');
+            if (msc && /^[0-9a-fA-F]{6}$/.test(msc)) {
+                params.main.shaderColor = '#' + msc.toLowerCase();
+            }
             // Older links carried structure-wide motion settings; apply
             // them to every layer so those links still reproduce.
             const LEGACY_MAIN = { mrt: 'rotationSpeed', mbr: 'breathAmount', mtf: 'trailFade', mlw: 'lineWeight' };
@@ -892,6 +916,7 @@
             for (let def of MAIN_CONTROLS) {
                 qs.set(def.share, params.main[def.key]);
             }
+            qs.set('msc', params.main.shaderColor.slice(1));
             for (let i = 0; i < MAX_LAYERS; i++) {
                 let n = i + 1;
                 for (let def of LAYER_CONTROLS) {
@@ -973,7 +998,19 @@
         //      fade to transparent and composite over the solid background
         //      each frame. The 3D slider tilts a structure out of plane and
         //      fans its layers apart in z, with perspective scaling plus
-        //      depth-cued brightness and line weight. A global fill toggle
+        //      depth-cued brightness and line weight. Two companion sliders
+        //      fake depth without tilting: Depth Fade dissolves the drawing
+        //      to transparency in a circular gradient that closes in from
+        //      the outer edges — the surviving central orb shrinks with the
+        //      slider all the way down to nothing at the maximum —
+        //      and Axis Highlight pushes every spoke — branch axes included
+        //      — toward bright white so the corners read as 3D edges. The
+        //      Core Shader tints threads by distance from the origin —
+        //      amount, radius, softness and a color of its own — so the
+        //      color carves an inner shape out of the form. Both radial
+        //      effects are painted per segment along each line, so a single
+        //      thread can pass through tinted, faded and untouched zones. A
+        //      global fill toggle
         //      paints the region the threads cover — bounded by their
         //      envelope curves — in a chosen fill color so the space
         //      between the threads reads solid instead of see-through.
@@ -985,7 +1022,7 @@
         let breathPhases = [];
         let satPhase = 0;
         let satConfigs = [];
-        let seedTraits = { weaveExp: 1, layerScale: 0.78, skip: 1 };
+        let seedTraits = { layerScale: 0.78, skip: 1 };
         let layerBuffers = new Array(MAX_LAYERS).fill(null);
         let satBuffers = new Array(MAX_SATS).fill(null);
         let frameState = { useGlow: true };
@@ -1064,12 +1101,11 @@
             randomSeed(params.seed);
             noiseSeed(params.seed);
 
-            // Seed-defined character of the whole composition: how sharply
-            // the thread envelopes curve, how tightly the stacked stars
-            // nest, and whether threads stitch adjacent spokes or leap
-            // across one (which weaves a crossing star-polygon lattice).
+            // Seed-defined character of the whole composition: how tightly
+            // the stacked stars nest, and whether threads stitch adjacent
+            // spokes or leap across one (which weaves a crossing
+            // star-polygon lattice).
             seedTraits = {
-                weaveExp: random(0.55, 1.7),
                 layerScale: random(0.62, 0.9),
                 skip: random() < 0.75 ? 1 : 2
             };
@@ -1162,7 +1198,8 @@
         //   R         outer radius of this structure
         //   cfg       { layers: [{ spokes, col, speedFactor }], totalLayers,
         //               d, spinBias, flip, rotationSpeed, breathAmount,
-        //               lineWeight, depth3d, fillCol } — layers ordered
+        //               lineWeight, depth3d, depthFade, axisGlow, shader,
+        //               fillCol } — layers ordered
         //               bottom to top, so each added layer paints over the
         //               ones before it. A layer may carry its own overrides
         //               { index, sizeMult, rotationSpeed, breathAmount,
@@ -1186,22 +1223,60 @@
             const { useGlow } = frameState;
             const d = cfg.d;
             const nTotal = cfg.totalLayers || cfg.layers.length;
+            // Faked depth: depthFade dissolves the drawing to transparency
+            // in a circular gradient closing in from the outer edges,
+            // axisGlow brightens every spoke, and the core shader tints
+            // threads by their distance from the origin so the color itself
+            // carves an inner shape out of the form. Both radial effects
+            // are evaluated per segment along each line, so one thread can
+            // fade or change color along its own length.
+            const depthFade = cfg.depthFade || 0;
+            const axisGlow = cfg.axisGlow || 0;
+            const sh = cfg.shader || null;
+
+            // Fully opaque inside fadeStart·R, fully transparent beyond
+            // fadeEnd·R; cranking the slider pulls the whole band inward,
+            // shrinking the surviving central orb until, at the maximum,
+            // the band passes the origin and everything is transparent —
+            // so every orb size in between is selectable.
+            const fadeStart = 1.1 - 1.5 * depthFade;
+            const fadeEnd = fadeStart + 0.4;
+            const radialAlpha = (nd) => {
+                if (depthFade <= 0) return 1;
+                let tt = (nd - fadeStart) / (fadeEnd - fadeStart);
+                tt = Math.min(1, Math.max(0, tt));
+                return 1 - tt * tt * (3 - 2 * tt);
+            };
+
+            // Blend weight toward the shader color: full inside the
+            // softness band, easing to zero at the shader radius.
+            const shaderW = (nd) => {
+                if (!sh) return 0;
+                let e1 = sh.radius;
+                let e0 = e1 * (1 - sh.softness);
+                let tt = nd >= e1 ? 1 : nd <= e0 ? 0 : (nd - e0) / (e1 - e0);
+                return sh.amount * (1 - tt * tt * (3 - 2 * tt));
+            };
+
+            // Segments per line: 1 collapses to plain lines when neither
+            // radial effect is active
+            const SEGS = (depthFade > 0 || sh) ? 6 : 1;
 
             // Anchor fractions along each pair of spokes; chord j runs from
-            // fraction fr[j][0] of spoke A to fraction fr[j][1] of spoke B.
-            // Shared by the stitched chords and the fill silhouette.
+            // fraction (d-j)/d of spoke A to fraction (j+1)/d of spoke B.
+            // Uniform steps keep the stitch ladder equally spaced all the
+            // way in to the origin. Shared by the stitched chords and the
+            // fill silhouette.
             let fr = [];
             for (let j = 0; j < d; j++) {
-                fr.push([
-                    Math.pow((d - j) / d, seedTraits.weaveExp),
-                    Math.pow((j + 1) / d, seedTraits.weaveExp)
-                ]);
+                fr.push([(d - j) / d, (j + 1) / d]);
             }
 
-            // 3D: tilt the structure's plane (with a slow wobble) and fan
-            // the layers apart along z; perspective-project every point.
-            // depth3d = 0 collapses exactly to the flat 2D rendering.
-            const tilt = cfg.depth3d * (0.6 + 0.35 * Math.sin(t * 0.4));
+            // 3D: tilt the structure's plane to a fixed angle set by the
+            // slider and fan the layers apart along z; perspective-project
+            // every point. depth3d = 0 collapses exactly to the flat 2D
+            // rendering.
+            const tilt = cfg.depth3d * 0.85;
             const cosT = Math.cos(tilt);
             const sinT = Math.sin(tilt);
             const F = Math.max(R * 4, 1);
@@ -1279,44 +1354,88 @@
                     g.noFill();
                 }
 
-                // 1. The frame: the spokes themselves, faint
-                g.stroke(r0, g0, b0, 70);
-                g.strokeWeight(lineWeight * 0.8);
-                for (let tip of tips) {
-                    let [tx, ty] = proj(tip.x, tip.y);
-                    g.line(pcx, pcy, tx, ty);
-                }
+                // 1. The frame: the spokes themselves, faint — unless the
+                // axis highlight is up, which pushes every axis (branch
+                // generations included) toward bright white so the corners
+                // read as 3D edges. Spokes fade with depth fade too, so a
+                // highlighted axis still dissolves past the fade radius.
+                // Highlighted axes are painted after the stitching so they
+                // stay continuous instead of being chopped up by the
+                // threads crossing them.
+                const drawFrame = () => {
+                    let spokeR = r0 + (255 - r0) * axisGlow;
+                    let spokeG = g0 + (255 - g0) * axisGlow;
+                    let spokeB = b0 + (255 - b0) * axisGlow;
+                    let spokeA = 70 + 185 * axisGlow;
+                    g.strokeWeight(lineWeight * (0.8 + 2.4 * axisGlow));
+                    for (let tip of tips) {
+                        for (let s = 0; s < SEGS; s++) {
+                            let f0 = s / SEGS, f1 = (s + 1) / SEGS;
+                            let nd = Math.hypot(tip.x, tip.y) * (f0 + f1) / 2 / R;
+                            let aMul = radialAlpha(nd);
+                            if (aMul <= 0.004) continue;
+                            let [x0, y0] = proj(tip.x * f0, tip.y * f0);
+                            let [x1, y1] = proj(tip.x * f1, tip.y * f1);
+                            g.stroke(spokeR, spokeG, spokeB, spokeA * aMul);
+                            g.line(x0, y0, x1, y1);
+                        }
+                    }
+                };
+                if (axisGlow <= 0) drawFrame();
 
                 // 2. The stitching: straight chords woven between adjacent spokes
                 for (let i = 0; i < tips.length; i++) {
                     let A = tips[i];
                     let B = tips[(i + seedTraits.skip) % tips.length];
                     for (let j = 0; j < d; j++) {
-                        // weaveExp warps how fast the anchors slide along
-                        // their spokes, bending the envelope's curvature
                         let fA = fr[j][0];   // slides down spoke A
                         let fB = fr[j][1];   // slides up spoke B
-                        let [x1, y1, s1] = proj(A.x * fA, A.y * fA);
-                        let [x2, y2, s2] = proj(B.x * fB, B.y * fB);
-                        let sAvg = (s1 + s2) / 2;
+                        let ax = A.x * fA, ay = A.y * fA;
+                        let bx = B.x * fB, by = B.y * fB;
 
-                        // thread brightens toward the envelope's vertex,
-                        // and nearer (larger) depth reads brighter/thicker
+                        // thread brightens toward the envelope's vertex
                         let v = 1 - Math.abs(j / (d - 1) - 0.5) * 2;
-                        let depthCue = Math.min(1.25, Math.max(0.55, sAvg));
-                        let a = Math.min(255, (90 + 130 * v) * depthCue);
 
-                        if (useGlow) {
-                            g.stroke(r0, g0, b0, 18);
-                            g.strokeWeight(lineWeight * 3);
+                        // Each segment carries its own radial position, so
+                        // the depth fade and shader tint sweep smoothly
+                        // along the thread instead of switching per line
+                        for (let s = 0; s < SEGS; s++) {
+                            let t0 = s / SEGS, t1 = (s + 1) / SEGS;
+                            let px0 = ax + (bx - ax) * t0, py0 = ay + (by - ay) * t0;
+                            let px1 = ax + (bx - ax) * t1, py1 = ay + (by - ay) * t1;
+                            let nd = Math.hypot(px0 + px1, py0 + py1) / (2 * R);
+                            let aMul = radialAlpha(nd);
+                            if (aMul <= 0.004) continue;
+
+                            let [x1, y1, s1] = proj(px0, py0);
+                            let [x2, y2, s2] = proj(px1, py1);
+
+                            // nearer (larger) depth reads brighter/thicker
+                            let depthCue = Math.min(1.25, Math.max(0.55, (s1 + s2) / 2));
+                            let a = Math.min(255, (90 + 130 * v) * depthCue) * aMul;
+
+                            let cr = r0, cg = g0, cb = b0;
+                            let w = shaderW(nd);
+                            if (w > 0) {
+                                cr += (sh.r - cr) * w;
+                                cg += (sh.g - cg) * w;
+                                cb += (sh.b - cb) * w;
+                            }
+
+                            if (useGlow) {
+                                g.stroke(cr, cg, cb, 18 * aMul);
+                                g.strokeWeight(lineWeight * 3);
+                                g.line(x1, y1, x2, y2);
+                            }
+
+                            g.stroke(cr, cg, cb, a);
+                            g.strokeWeight(lineWeight * depthCue);
                             g.line(x1, y1, x2, y2);
                         }
-
-                        g.stroke(r0, g0, b0, a);
-                        g.strokeWeight(lineWeight * depthCue);
-                        g.line(x1, y1, x2, y2);
                     }
                 }
+
+                if (axisGlow > 0) drawFrame();
             }
         }
 
@@ -1334,6 +1453,18 @@
             // breathing, trails, line weight) plus a seeded speed rate, and
             // renders into its own trail buffer so trail fade is per-layer.
             let m = params.main;
+            // Core shader: resolved once per frame, shared by every layer
+            // so the tinted region reads as one shape across the stack
+            let shaderCfg = null;
+            if (m.shaderAmount > 0) {
+                let shCol = color(m.shaderColor);
+                shaderCfg = {
+                    amount: m.shaderAmount,
+                    radius: m.shaderRadius,
+                    softness: m.shaderSoftness,
+                    r: red(shCol), g: green(shCol), b: blue(shCol)
+                };
+            }
             let mainLayerCfgs = [];
             for (let L = 0; L < params.layerCount; L++) {
                 let lp = params.layers[L];
@@ -1356,6 +1487,9 @@
                     breathAmount: lp.breathAmount,
                     lineWeight: lp.lineWeight,
                     depth3d: m.depth3d,
+                    depthFade: m.depthFade,
+                    axisGlow: m.axisGlow,
+                    shader: shaderCfg,
                     fillCol: fillCol
                 });
             }
@@ -1443,6 +1577,11 @@
         // ═══════════════════════════════════════════════════════════════════════
         // UI CONTROL HANDLERS
         // ═══════════════════════════════════════════════════════════════════════
+
+        // Save the current frame of the canvas as a PNG download
+        function captureScreenshot() {
+            saveCanvas('sacred-loop-' + params.seed, 'png');
+        }
 
         function toggleSidebar() {
             document.body.classList.toggle('sidebar-hidden');
@@ -1547,6 +1686,7 @@
                         <div class="color-picker-container">
                             <span class="color-value" id="layer${i}-color-value">${lp.color}</span>
                             <input type="color" value="${lp.color}" onchange="updateLayerColor(${i}, this.value)">
+                            <button class="mini-sync" title="Sync all layers to this color" onclick="syncLayerColor(${i})">⇉</button>
                         </div>
                     </div>
                     <div class="card-body">
@@ -1577,6 +1717,15 @@
             document.getElementById('layer' + layerIndex + '-color-value').textContent = value;
         }
 
+        // Copy one layer's color to every other layer
+        function syncLayerColor(layerIndex) {
+            let c = params.layers[layerIndex].color;
+            for (let lp of params.layers) {
+                lp.color = c;
+            }
+            renderLayerControls();
+        }
+
         function renderMainControls() {
             let html = '';
             for (let def of MAIN_CONTROLS) {
@@ -1589,6 +1738,11 @@
             let def = MAIN_CONTROLS.find(d => d.key === key);
             params.main[key] = def.int ? parseInt(value) : parseFloat(value);
             document.getElementById('main-' + key + '-value').textContent = value;
+        }
+
+        function updateShaderColor(value) {
+            params.main.shaderColor = value;
+            document.getElementById('shaderColor-value').textContent = value;
         }
 
         function renderSatelliteControls() {
@@ -1706,6 +1860,8 @@
             document.getElementById('fillMode').checked = params.fillMode;
             document.getElementById('fillColor').value = params.fillColor;
             document.getElementById('fillColor-value').textContent = params.fillColor;
+            document.getElementById('shaderColor').value = params.main.shaderColor;
+            document.getElementById('shaderColor-value').textContent = params.main.shaderColor;
             document.getElementById('satellitesEnabled').checked = params.satellitesEnabled;
             satCollapsed = new Array(MAX_SATS).fill(!params.satellitesEnabled);
 
