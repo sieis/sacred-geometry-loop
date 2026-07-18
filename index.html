@@ -1073,7 +1073,13 @@
 
         function makeBuffer(w, h) {
             let g = createGraphics(w, h);
-            g.pixelDensity(DENSITY);
+            // Match the main canvas's current density rather than a fixed
+            // constant: during a high-res export the main canvas is
+            // deliberately dropped to density 1 (the export already targets
+            // exact output pixels), and buffers ballooning to DENSITY on top
+            // of an already-4K canvas multiplies memory for no benefit and
+            // risks silently failing on memory-constrained browsers.
+            g.pixelDensity(pixelDensity());
             return g;
         }
 
@@ -1611,6 +1617,16 @@
             const wasLooping = isLooping();
             noLoop();
 
+            // p5 always runs one more queued frame after noLoop() even
+            // though looping is off (by design, so the sketch doesn't
+            // freeze mid-frame). Yield once here, before touching any
+            // export state, so that stray frame — if one was already
+            // queued — plays out harmlessly at the original size instead
+            // of landing mid-warm-up-loop later. This is also the only
+            // yield in the whole function: everything below runs in one
+            // synchronous block so nothing else can interleave with it.
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
             function resetTrailBuffers() {
                 for (let L = 0; L < MAX_LAYERS; L++) {
                     if (layerBuffers[L]) { layerBuffers[L].remove(); layerBuffers[L] = null; }
@@ -1646,13 +1662,11 @@
                 resetTrailBuffers();
 
                 t = originalT - WARMUP_FRAMES * 0.01;
+                // Runs synchronously start to finish (no yielding) so
+                // nothing else — including p5's own render loop — can
+                // touch canvas size, density, or trail buffers mid-warm-up.
                 for (let i = 0; i < WARMUP_FRAMES; i++) {
                     draw();
-                    // Yield periodically so the tab stays responsive during
-                    // the render instead of freezing for the whole warm-up.
-                    if (i % 20 === 19) {
-                        await new Promise((resolve) => setTimeout(resolve, 0));
-                    }
                 }
 
                 saveCanvas('sacred-loop-' + params.seed + '-4k', 'png');
