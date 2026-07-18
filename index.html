@@ -603,13 +603,22 @@
             </div>
 
             <div class="control-section">
-                <h3>Main Structure</h3>
-                <div id="main-controls"></div>
-                <div class="color-group">
-                    <label>Shader Color</label>
-                    <div class="color-picker-container">
-                        <input type="color" id="shaderColor" value="#d94040" onchange="updateShaderColor(this.value)">
-                        <span class="color-value" id="shaderColor-value">#d94040</span>
+                <div class="layer-card collapsed" id="main-structure-card">
+                    <div class="layer-card-title">
+                        <div class="card-title-left">
+                            <button class="collapse-button" onclick="toggleMainCollapsed()" id="main-collapse-btn" title="Expand">▸</button>
+                            <span class="card-title-name" onclick="toggleMainCollapsed()">Main Structure</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="main-controls"></div>
+                        <div class="color-group">
+                            <label>Shader Color</label>
+                            <div class="color-picker-container">
+                                <input type="color" id="shaderColor" value="#d94040" onchange="updateShaderColor(this.value)">
+                                <span class="color-value" id="shaderColor-value">#d94040</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1780,6 +1789,14 @@
         function toggleSatCollapsed(i) {
             satCollapsed[i] = !satCollapsed[i];
             renderSatelliteControls();
+        }
+
+        function toggleMainCollapsed() {
+            let card = document.getElementById('main-structure-card');
+            let collapsed = card.classList.toggle('collapsed');
+            let btn = document.getElementById('main-collapse-btn');
+            btn.textContent = collapsed ? '▸' : '▾';
+            btn.title = collapsed ? 'Expand' : 'Collapse';
         }
 
         function renderLayerControls() {
