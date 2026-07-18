@@ -329,6 +329,10 @@
             flex-shrink: 0;
         }
 
+        .card-title-name {
+            cursor: pointer;
+        }
+
         .collapse-button:hover {
             color: var(--anthropic-orange);
         }
@@ -599,13 +603,22 @@
             </div>
 
             <div class="control-section">
-                <h3>Main Structure</h3>
-                <div id="main-controls"></div>
-                <div class="color-group">
-                    <label>Shader Color</label>
-                    <div class="color-picker-container">
-                        <input type="color" id="shaderColor" value="#d94040" onchange="updateShaderColor(this.value)">
-                        <span class="color-value" id="shaderColor-value">#d94040</span>
+                <div class="layer-card collapsed" id="main-structure-card">
+                    <div class="layer-card-title">
+                        <div class="card-title-left">
+                            <button class="collapse-button" onclick="toggleMainCollapsed()" id="main-collapse-btn" title="Expand">▸</button>
+                            <span class="card-title-name" onclick="toggleMainCollapsed()">Main Structure</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="main-controls"></div>
+                        <div class="color-group">
+                            <label>Shader Color</label>
+                            <div class="color-picker-container">
+                                <input type="color" id="shaderColor" value="#d94040" onchange="updateShaderColor(this.value)">
+                                <span class="color-value" id="shaderColor-value">#d94040</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -652,15 +665,15 @@
                     <div class="color-group">
                         <label>Background</label>
                         <div class="color-picker-container">
-                            <input type="color" id="color1" value="#2b1f14" onchange="updateBackground(this.value)">
-                            <span class="color-value" id="color1-value">#2b1f14</span>
+                            <input type="color" id="color1" value="#000000" onchange="updateBackground(this.value)">
+                            <span class="color-value" id="color1-value">#000000</span>
                         </div>
                     </div>
                     <div class="color-group">
                         <label>Fill</label>
                         <div class="color-picker-container">
-                            <input type="color" id="fillColor" value="#2b1f14" onchange="updateFillColor(this.value)">
-                            <span class="color-value" id="fillColor-value">#2b1f14</span>
+                            <input type="color" id="fillColor" value="#000000" onchange="updateFillColor(this.value)">
+                            <span class="color-value" id="fillColor-value">#000000</span>
                         </div>
                     </div>
                 </div>
@@ -724,7 +737,7 @@
                 branchDepth: branchDepth,
                 color: color,
                 size: 1,
-                rotationSpeed: 0.35,
+                rotationSpeed: 0,
                 breathAmount: 0,
                 trailFade: 120,
                 lineWeight: 1.0
@@ -748,16 +761,16 @@
             // previous ones with its own color, axes, branch depth, size,
             // rotation, breathing, trail fade and line weight.
             layers: [
-                defaultLayer(6,  1, '#f0e6d2'),
-                defaultLayer(8,  1, '#d9a066'),
-                defaultLayer(4,  1, '#c86641'),
-                defaultLayer(10, 0, '#6a9bcc'),
-                defaultLayer(12, 0, '#788c5d')
+                defaultLayer(6,  0, '#ffffff'),
+                defaultLayer(8,  0, '#ffffff'),
+                defaultLayer(4,  0, '#ffffff'),
+                defaultLayer(10, 0, '#ffffff'),
+                defaultLayer(12, 0, '#ffffff')
             ],
             // Structure-wide character: overall zoom, the 3D layer fan,
             // the faked-depth line treatments and the core shader
             main: {
-                sizeScale: 0.55,
+                sizeScale: 0.8,
                 depth3d: 0,
                 depthFade: 0,
                 axisGlow: 0,
@@ -770,9 +783,9 @@
             satelliteCount: 0,
             // Every satellite carries its own full set of controls
             satellites: [0, 1, 2, 3, 4, 5].map(defaultSatellite),
-            background: '#2b1f14',
-            fillMode: false,
-            fillColor: '#2b1f14',
+            background: '#000000',
+            fillMode: true,
+            fillColor: '#000000',
             fillColorCustom: false
         };
 
@@ -1765,7 +1778,7 @@
 
         // Collapse state of the per-layer and per-satellite cards (pure UI
         // state, so it isn't part of params or share links)
-        let layerCollapsed = new Array(MAX_LAYERS).fill(false);
+        let layerCollapsed = new Array(MAX_LAYERS).fill(true);
         let satCollapsed = new Array(MAX_SATS).fill(false);
 
         function toggleLayerCollapsed(i) {
@@ -1776,6 +1789,14 @@
         function toggleSatCollapsed(i) {
             satCollapsed[i] = !satCollapsed[i];
             renderSatelliteControls();
+        }
+
+        function toggleMainCollapsed() {
+            let card = document.getElementById('main-structure-card');
+            let collapsed = card.classList.toggle('collapsed');
+            let btn = document.getElementById('main-collapse-btn');
+            btn.textContent = collapsed ? '▸' : '▾';
+            btn.title = collapsed ? 'Expand' : 'Collapse';
         }
 
         function renderLayerControls() {
@@ -1793,7 +1814,7 @@
                     <div class="layer-card-title">
                         <div class="card-title-left">
                             <button class="collapse-button" onclick="toggleLayerCollapsed(${i})" title="${layerCollapsed[i] ? 'Expand' : 'Collapse'}">${layerCollapsed[i] ? '▸' : '▾'}</button>
-                            <span>Layer ${i + 1}${i === 0 ? ' (base)' : ''}</span>
+                            <span class="card-title-name" onclick="toggleLayerCollapsed(${i})">Layer ${i + 1}${i === 0 ? ' (base)' : ''}</span>
                         </div>
                         <div class="color-picker-container">
                             <span class="color-value" id="layer${i}-color-value">${lp.color}</span>
@@ -1871,7 +1892,7 @@
                     <div class="layer-card-title">
                         <div class="card-title-left">
                             <button class="collapse-button" onclick="toggleSatCollapsed(${i})" title="${satCollapsed[i] ? 'Expand' : 'Collapse'}">${satCollapsed[i] ? '▸' : '▾'}</button>
-                            <span>Satellite ${i + 1}</span>
+                            <span class="card-title-name" onclick="toggleSatCollapsed(${i})">Satellite ${i + 1}</span>
                         </div>
                         <div class="color-picker-container">
                             <span class="color-value" id="sat${i}-color-value">${sp.color}</span>
