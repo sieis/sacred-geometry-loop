@@ -1590,15 +1590,16 @@
         // UI CONTROL HANDLERS
         // ═══════════════════════════════════════════════════════════════════════
 
-        // Export the current frame at a fixed 4K long edge, independent of
-        // the on-screen canvas/window size. Trail buffers hold raster
-        // history, so simply resizing the live canvas would capture a
-        // blank fade-in — instead we rebuild the buffers at export
-        // resolution and replay enough frames for even the slowest trail
-        // fade setting to reach the same steady state visible on screen,
-        // landing back on the exact animation moment (t) that was showing
-        // when the button was pressed. Rendering natively at 4K (rather
-        // than upscaling a smaller capture) is what gives the export its
+        // Export the current frame as a fixed-size square (4096x4096 on
+        // desktop), independent of the on-screen canvas/window size or
+        // aspect ratio. Trail buffers hold raster history, so simply
+        // resizing the live canvas would capture a blank fade-in — instead
+        // we rebuild the buffers at export resolution and replay enough
+        // frames for even the slowest trail fade setting to reach the same
+        // steady state visible on screen, landing back on the exact
+        // animation moment (t) that was showing when the button was
+        // pressed. Rendering natively at full resolution (rather than
+        // upscaling a smaller capture) is what gives the export its
         // anti-aliasing: every curve is drawn with canvas's built-in edge
         // antialiasing at full target resolution instead of being
         // stretched from a lower-res frame.
@@ -1637,10 +1638,21 @@
             }
 
             try {
-                const EXPORT_LONG_EDGE = 3840; // 4K UHD on the longer edge
-                const aspect = originalW / originalH;
-                const exportW = aspect >= 1 ? EXPORT_LONG_EDGE : Math.round(EXPORT_LONG_EDGE * aspect);
-                const exportH = aspect >= 1 ? Math.round(EXPORT_LONG_EDGE / aspect) : EXPORT_LONG_EDGE;
+                // A square export, always exactly EXPORT_SIZE x EXPORT_SIZE:
+                // the artwork is already drawn centered on width/2, height/2
+                // with its scale tied to min(width, height), so a square
+                // canvas centers it with even margins on all sides for free
+                // — no separate centering math needed. Mobile browsers (iOS
+                // Safari in particular) enforce much tighter canvas memory
+                // /area ceilings than desktop, so a full 4096 square plus
+                // several same-size offscreen trail buffers is prone to
+                // silently failing there; drop to a safer size on touch
+                // devices rather than risk another blank export.
+                const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                    (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+                const EXPORT_SIZE = isMobile ? 2048 : 4096;
+                const exportW = EXPORT_SIZE;
+                const exportH = EXPORT_SIZE;
 
                 // Enough warm-up frames for the slowest active trail fade to
                 // decay to ~1% of full strength, so trails look the same as
@@ -1669,7 +1681,7 @@
                     draw();
                 }
 
-                saveCanvas('sacred-loop-' + params.seed + '-4k', 'png');
+                saveCanvas('sacred-loop-' + params.seed + '-' + exportW + 'x' + exportH, 'png');
             } finally {
                 pixelDensity(originalDensity);
                 resizeCanvas(originalW, originalH);
