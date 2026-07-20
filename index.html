@@ -496,6 +496,11 @@
             margin-top: 8px;
         }
 
+        .export-toggle {
+            margin-top: 16px;
+            margin-bottom: 0;
+        }
+
         /* Canvas Area */
         .canvas-area {
             flex: 1;
@@ -686,6 +691,25 @@
                     <button class="button" onclick="resetParameters()">Reset</button>
                 </div>
                 <button class="button secondary share-button" id="share-button" onclick="copyShareLink()">🔗 Copy Share Link</button>
+
+                <div class="control-group toggle-row export-toggle">
+                    <label for="exportLayersSeparate">Export layers separately</label>
+                    <label class="switch">
+                        <input type="checkbox" id="exportLayersSeparate">
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+                <span class="hint">each main layer is saved as its own transparent PNG instead of one combined image</span>
+
+                <div class="control-group toggle-row export-toggle">
+                    <label for="exportSatellitesSeparate">Export satellites separately</label>
+                    <label class="switch">
+                        <input type="checkbox" id="exportSatellitesSeparate">
+                        <span class="switch-track"></span>
+                    </label>
+                </div>
+                <span class="hint">each satellite is saved as its own transparent PNG and kept off the main-layer images</span>
+
                 <button class="button tertiary share-button" id="export-button" onclick="captureScreenshot()">📷 Export 4K Image</button>
             </div>
         </div>
@@ -1045,6 +1069,10 @@
         let layerBuffers = new Array(MAX_LAYERS).fill(null);
         let satBuffers = new Array(MAX_SATS).fill(null);
         let frameState = { useGlow: true };
+        // When set during an export, restricts the rendered frame to a
+        // subset of the composition (see renderScene); null for the live
+        // animation and the single full-image export.
+        let exportFilter = null;
         const PHI = 1.6180339887498948;
         const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
         const MAX_GENS = 4;
@@ -1465,13 +1493,40 @@
         }
 
         function draw() {
-            background(params.background);
+            renderScene(exportFilter);
+        }
+
+        // Render one frame of the whole composition. `filter` is null for
+        // the live animation and the single full-image export. During a
+        // separated export it narrows the frame to a subset of the
+        // structure and paints a transparent background so each exported
+        // PNG can be stacked back into the original composition.
+        //   filter = { transparent, layers, sats }
+        //   layers / sats: 'all' or an array of indices ([] = none)
+        function renderScene(filter) {
+            if (filter && filter.transparent) {
+                clear();
+            } else {
+                background(params.background);
+            }
             t += 0.01;
 
             let minDim = Math.min(width, height);
             let d = Math.round(params.linesPerShape);
             let S = params.satellitesEnabled ? params.satelliteCount : 0;
             let fillCol = params.fillMode ? color(params.fillColor) : null;
+
+            // Which structures this frame renders. A null filter draws the
+            // whole scene (live view and full-image export); a filter narrows
+            // it to selected main layers / satellites for a separated export.
+            let drawLayers = [];
+            for (let L = 0; L < params.layerCount; L++) drawLayers.push(L);
+            let drawSats = [];
+            for (let k = 0; k < S; k++) drawSats.push(k);
+            if (filter) {
+                drawLayers = filter.layers === 'all' ? drawLayers : (filter.layers || []);
+                drawSats = filter.sats === 'all' ? drawSats : (filter.sats || []);
+            }
 
             // The central structure: every active layer follows its own
             // full set of controls (color, axes, branches, size, rotation,
@@ -1570,7 +1625,7 @@
             const ORBIT_UNIT = minDim * 0.28;
 
             // Satellites first so the central structure composites over them
-            for (let k = 0; k < S; k++) {
+            for (let k of drawSats) {
                 let sp = params.satellites[k];
                 let c = satConfigs[k];
                 let satR = sp.size * ORBIT_UNIT;
@@ -1591,7 +1646,7 @@
             // The central structure: layer 1 at the bottom, each layer in
             // its own trail buffer so its fade can differ from the rest
             let mainR = minDim * 0.5 * m.sizeScale;
-            for (let L = 0; L < params.layerCount; L++) {
+            for (let L of drawLayers) {
                 let buf = ensureLayerBuffer(L);
                 fadeBuffer(buf, params.layers[L].trailFade);
                 drawStructure(buf, width / 2, height / 2, mainR, mainLayerCfgs[L]);
@@ -1682,20 +1737,69 @@
                 const decayFrames = Math.ceil(Math.log(0.01) / Math.log(1 - minFade / 255));
                 const WARMUP_FRAMES = Math.min(400, Math.max(60, decayFrames));
 
-                pixelDensity(1);
-                resizeCanvas(exportW, exportH);
-                resetTrailBuffers();
+                const sepLayers = document.getElementById('exportLayersSeparate').checked;
+                const sepSats = document.getElementById('exportSatellitesSeparate').checked;
+                const satsActive = params.satellitesEnabled && params.satelliteCount > 0;
 
-                t = originalT - WARMUP_FRAMES * 0.01;
-                // Runs synchronously start to finish (no yielding) so
-                // nothing else — including p5's own render loop — can
-                // touch canvas size, density, or trail buffers mid-warm-up.
-                for (let i = 0; i < WARMUP_FRAMES; i++) {
-                    draw();
+                // Assemble the list of images to render. With both toggles
+                // off this is a single full-image file (solid background —
+                // the original behavior). With either toggle on, each piece
+                // is rendered onto a transparent background so the exported
+                // PNGs can be stacked back into the original composition:
+                //   - separate layers -> one file per main layer
+                //   - separate sats   -> one file per satellite, kept off
+                //     the main-layer files entirely
+                // Satellites that aren't split into their own files but also
+                // can't belong to a single main layer (layers split, sats
+                // not) are written to one combined satellites file.
+                let jobs = [];
+                if (!sepLayers && !sepSats) {
+                    jobs.push({ filter: null, label: '' });
+                } else {
+                    if (sepLayers) {
+                        for (let L = 0; L < params.layerCount; L++) {
+                            jobs.push({ filter: { transparent: true, layers: [L], sats: [] }, label: 'layer' + (L + 1) });
+                        }
+                    } else {
+                        jobs.push({ filter: { transparent: true, layers: 'all', sats: [] }, label: 'main' });
+                    }
+                    if (satsActive) {
+                        if (sepSats) {
+                            for (let k = 0; k < params.satelliteCount; k++) {
+                                jobs.push({ filter: { transparent: true, layers: [], sats: [k] }, label: 'satellite' + (k + 1) });
+                            }
+                        } else {
+                            jobs.push({ filter: { transparent: true, layers: [], sats: 'all' }, label: 'satellites' });
+                        }
+                    }
                 }
 
-                saveCanvas('sacred-loop-' + params.seed + '-' + exportW + 'x' + exportH, 'png');
+                pixelDensity(1);
+                resizeCanvas(exportW, exportH);
+
+                // Render each file in turn: point the frame at that file's
+                // subset, reset the trail buffers, replay the warm-up frames
+                // so trails match the live view, then save. Each file's
+                // warm-up runs synchronously; a brief pause between files
+                // lets the browser register each separate download.
+                for (let j = 0; j < jobs.length; j++) {
+                    exportFilter = jobs[j].filter;
+                    if (btn && jobs.length > 1) {
+                        btn.textContent = '⏳ Rendering ' + (j + 1) + '/' + jobs.length + '…';
+                    }
+                    resetTrailBuffers();
+                    t = originalT - WARMUP_FRAMES * 0.01;
+                    for (let i = 0; i < WARMUP_FRAMES; i++) {
+                        draw();
+                    }
+                    let suffix = jobs[j].label ? '-' + jobs[j].label : '';
+                    saveCanvas('sacred-loop-' + params.seed + suffix + '-' + exportW + 'x' + exportH, 'png');
+                    if (j < jobs.length - 1) {
+                        await new Promise((resolve) => setTimeout(resolve, 400));
+                    }
+                }
             } finally {
+                exportFilter = null;
                 pixelDensity(originalDensity);
                 resizeCanvas(originalW, originalH);
                 resetTrailBuffers();
